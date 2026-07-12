@@ -18,6 +18,7 @@ from src.ui.statusbar import AppStatusBar
 from src.ui.styles import AppStyles
 from src.ui.toolbar import MainToolbar
 from src.ui.watchlist_page import WatchListPage
+from src.ui.workspace import ProfessionalMarketWorkspacePage
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget(self)
         self.dashboard_page = DashboardPage(self)
+        self.market_workspace_page = ProfessionalMarketWorkspacePage(self)
         self.market_watch_page = MarketWatchPage(self)
         self.watchlist_page = WatchListPage(self)
         self.portfolio_page = PortfolioPage(self)
@@ -76,6 +78,7 @@ class MainWindow(QMainWindow):
         self.settings_page = self._build_stub_page("Settings")
 
         self.pages.addWidget(self.dashboard_page)
+        self.pages.addWidget(self.market_workspace_page)
         self.pages.addWidget(self.market_watch_page)
         self.pages.addWidget(self.watchlist_page)
         self.pages.addWidget(self.ai_scanner_page)
@@ -115,6 +118,7 @@ class MainWindow(QMainWindow):
     def _switch_page(self, page_name: str) -> None:
         page_map = {
             "route.dashboard": self.dashboard_page,
+            "route.market_workspace": self.market_workspace_page,
             "route.market_watch": self.market_watch_page,
             "route.watchlist": self.watchlist_page,
             "route.scanner": self.ai_scanner_page,
@@ -134,7 +138,7 @@ class MainWindow(QMainWindow):
 
         if widget is self.dashboard_page:
             self.toolbar.set_connection_status("Connected")
-        elif widget in {self.market_watch_page, self.watchlist_page}:
+        elif widget in {self.market_workspace_page, self.market_watch_page, self.watchlist_page}:
             self.toolbar.set_connection_status("Connected")
         else:
             self.toolbar.set_connection_status("Ready")

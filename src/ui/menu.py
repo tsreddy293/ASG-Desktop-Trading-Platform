@@ -14,6 +14,7 @@ class NavigationMenu(QWidget):
         self.setObjectName("navigation_menu")
         self.menu_items = [
             ("route.dashboard", "Dashboard"),
+            ("route.market_workspace", "Market Workspace"),
             ("route.market_watch", "Market Watch"),
             ("route.watchlist", "Watchlist"),
             ("route.scanner", "Scanner"),
