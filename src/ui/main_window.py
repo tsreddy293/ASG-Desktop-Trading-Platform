@@ -12,8 +12,10 @@ from src.ui.chart_window import ChartWindow
 from src.ui.dashboard_page import DashboardPage
 from src.ui.market_watch_page import MarketWatchPage
 from src.ui.menu import NavigationMenu
+from src.ui.holdings_page import HoldingsPage
 from src.ui.orders_page import OrdersPage
-from src.ui.portfolio_page import PortfolioPage
+from src.ui.portfolio_summary_page import PortfolioSummaryPage
+from src.ui.positions_page import PositionsPage
 from src.ui.statusbar import AppStatusBar
 from src.ui.styles import AppStyles
 from src.ui.toolbar import MainToolbar
@@ -57,8 +59,7 @@ class MainWindow(QMainWindow):
         self.market_workspace_page = ProfessionalMarketWorkspacePage(self)
         self.market_watch_page = MarketWatchPage(self)
         self.watchlist_page = WatchListPage(self)
-        self.portfolio_page = PortfolioPage(self)
-        self.portfolio_page.symbol_double_clicked.connect(self.open_ai_analysis)
+        self.portfolio_page = PortfolioSummaryPage(self)
         self.ai_analysis_page = AIAnalysisView(self)
         self.ai_analysis_controller = AIAnalysisController(self.ai_analysis_page)
         self.charts_page = ChartsPage(self)
@@ -72,8 +73,8 @@ class MainWindow(QMainWindow):
         self.ai_scanner_controller.refresh_scan()
 
         self.orders_page = OrdersPage(self)
-        self.positions_page = self._build_stub_page("Positions")
-        self.holdings_page = self._build_stub_page("Holdings")
+        self.positions_page = PositionsPage(self)
+        self.holdings_page = HoldingsPage(self)
         self.strategy_page = self._build_stub_page("Strategy")
         self.settings_page = self._build_stub_page("Settings")
 

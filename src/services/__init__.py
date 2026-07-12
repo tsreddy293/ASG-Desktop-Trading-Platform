@@ -5,6 +5,7 @@ __all__ = [
     "OrderService",
     "OrderValidator",
     "ValidationContext",
+    "PortfolioService",
     "WebSocketService",
 ]
 
@@ -26,6 +27,10 @@ def __getattr__(name: str):
         from src.services.order_validator import OrderValidator, ValidationContext
 
         return OrderValidator if name == "OrderValidator" else ValidationContext
+    if name == "PortfolioService":
+        from src.services.portfolio_service import PortfolioService
+
+        return PortfolioService
     if name == "WebSocketService":
         from src.services.websocket_service import WebSocketService
 
