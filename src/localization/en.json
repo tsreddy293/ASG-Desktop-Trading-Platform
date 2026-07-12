@@ -1,0 +1,12 @@
+{
+  "app_name": "AI Stock Guardian",
+  "dashboard": "Dashboard",
+  "market_watch": "Market Watch",
+  "scanner": "Scanner",
+  "strategies": "Strategies",
+  "paper_trading": "Paper Trading",
+  "auto_trading": "Auto Trading",
+  "portfolio": "Portfolio",
+  "reports": "Reports",
+  "settings": "Settings"
+}

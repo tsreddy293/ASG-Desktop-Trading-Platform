@@ -1,0 +1,11 @@
+{
+    "app_name": "AI Stock Guardian",
+    "version": "0.2.0",
+    "language": "en",
+    "theme": "dark",
+    "database": "database/asg.db",
+    "log_file": "logs/asg.log",
+    "broker": "",
+    "default_broker": "fivepaisa",
+    "market_refresh_interval_seconds": 1
+}
