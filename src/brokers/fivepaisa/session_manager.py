@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import os
 
 from src.brokers.base_broker import BrokerConnectionError
 from src.core.logger import app_logger
@@ -34,7 +35,8 @@ class FivePaisaSessionManager:
 
     def set_session(self, access_token: str, client_code: str, status: str, refresh_token: str = "") -> BrokerSession:
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(days=1)
+        ttl_hours = float(os.getenv("FIVEPAISA_SESSION_TTL_HOURS", "24") or "24")
+        expires_at = now + timedelta(hours=max(1.0, ttl_hours))
         session = BrokerSession(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -69,7 +71,9 @@ class FivePaisaSessionManager:
         session = self.get_session()
         if session is None:
             return True
-        return datetime.now(timezone.utc) >= session.expires_at
+        buffer_minutes = float(os.getenv("FIVEPAISA_REFRESH_BUFFER_MINUTES", "5") or "5")
+        refresh_at = session.expires_at - timedelta(minutes=max(0.0, buffer_minutes))
+        return datetime.now(timezone.utc) >= refresh_at
 
     def require_valid_session(self) -> BrokerSession:
         session = self.get_session()

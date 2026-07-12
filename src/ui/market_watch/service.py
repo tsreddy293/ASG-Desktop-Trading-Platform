@@ -5,7 +5,7 @@ from typing import Protocol
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from src.brokers.fivepaisa.market_data_service import MarketDataService
+from src.marketdata.service import MarketDataService, market_data_service
 from src.ui.market_watch.models import DepthLevel, MarketDepthSnapshot, MarketWatchState, WatchQuote
 
 
@@ -16,7 +16,7 @@ class MarketDataBackend(Protocol):
     def get_market_depth(self, symbol: str) -> dict:
         ...
 
-    def get_quote(self, symbol: str) -> dict:
+    def get_quote(self, symbol: str):
         ...
 
 
@@ -27,7 +27,7 @@ class MarketWatchBackgroundService(QObject):
 
     def __init__(self, backend: MarketDataBackend | None = None, interval_ms: int = 2000) -> None:
         super().__init__()
-        self._backend = backend or MarketDataService()
+        self._backend = backend or market_data_service
         self._interval_ms = max(1000, int(interval_ms))
         self._symbols: list[str] = []
         self._selected_symbol: str | None = None

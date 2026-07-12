@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import os
 from threading import Event, RLock, Thread
 from time import sleep
 from typing import Callable
@@ -11,7 +12,6 @@ from src.core.logger import app_logger
 from src.brokers import BrokerConnectionError, broker_manager
 from src.marketdata.model import HistoricalCandle, MarketDataEvent, MarketDepthLevel, MarketDepthSnapshot, MarketEventType, MarketInstrument, OptionChainRow, OptionChainSnapshot, OrderRecord, PortfolioPosition
 from src.services.market_cache import MarketCache
-from src.services.websocket_service import WebSocketService
 
 
 EventHandler = Callable[[MarketDataEvent], None]
@@ -49,7 +49,6 @@ class MarketDataService:
         self._quotes: dict[tuple[str, str], MarketInstrument] = {}
         self._reconnecting = False
         self._last_error = ""
-        self._ws = WebSocketService(self._broker_manager.login, self._broker_manager.logout, interval_seconds=2.0)
 
     def start(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -57,13 +56,11 @@ class MarketDataService:
         self._stop.clear()
         self._worker = Thread(target=self._run, daemon=True)
         self._worker.start()
-        self._ws.start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._worker is not None and self._worker.is_alive():
             self._worker.join(timeout=1.5)
-        self._ws.stop()
 
     def subscribe(self, handler: EventHandler) -> None:
         with self._lock:
@@ -91,6 +88,46 @@ class MarketDataService:
             return found
         fallback = {row.symbol: row for row in self._fallback_live_quotes(exchange.upper())}
         return fallback.get(symbol.upper())
+
+    def get_quotes(self, symbols: list[str], exchange: str = "NSE") -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for symbol in symbols:
+            quote = self.get_quote(symbol, exchange)
+            if quote is None:
+                rows.append(self._empty_quote_row(str(symbol or "").upper(), exchange.upper()))
+                continue
+            rows.append(
+                {
+                    "symbol": quote.symbol,
+                    "company": quote.company,
+                    "sector": quote.sector,
+                    "exchange": quote.exchange,
+                    "ltp": quote.ltp,
+                    "open": quote.open,
+                    "high": quote.high,
+                    "low": quote.low,
+                    "close": quote.previous_close,
+                    "change": quote.change,
+                    "change_percent": quote.change_percent,
+                    "volume": quote.volume,
+                    "bid": quote.bid,
+                    "ask": quote.ask,
+                    "timestamp": quote.timestamp,
+                }
+            )
+        return rows
+
+    def get_watchlist_quotes(self) -> list[dict[str, object]]:
+        raw = os.getenv("FIVEPAISA_WATCH_SYMBOLS", "SBIN,RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK")
+        symbols = [item.strip().upper() for item in raw.split(",") if item.strip()]
+        return self.get_quotes(symbols, exchange="NSE")
+
+    def get_indices(self) -> list[dict[str, object]]:
+        raw = os.getenv("FIVEPAISA_INDEX_SYMBOLS", "NIFTY,BANKNIFTY,SENSEX,VIX")
+        symbols = [item.strip().upper() for item in raw.split(",") if item.strip()]
+        rows = self.get_quotes(symbols, exchange="NSE")
+        by_symbol = {str(row.get("symbol", "")).upper(): row for row in rows}
+        return [by_symbol.get(symbol, self._empty_quote_row(symbol, "NSE")) for symbol in symbols]
 
     def get_market_depth(self, symbol: str, exchange: str = "NSE") -> MarketDepthSnapshot:
         key = f"depth:{exchange.upper()}:{symbol.upper()}"
@@ -249,6 +286,27 @@ class MarketDataService:
             )
         return rows
 
+    @staticmethod
+    def _empty_quote_row(symbol: str, exchange: str) -> dict[str, object]:
+        now = datetime.now(timezone.utc)
+        return {
+            "symbol": symbol,
+            "company": symbol,
+            "sector": "Unknown",
+            "exchange": exchange,
+            "ltp": 0.0,
+            "open": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "close": 0.0,
+            "change": 0.0,
+            "change_percent": 0.0,
+            "volume": 0,
+            "bid": 0.0,
+            "ask": 0.0,
+            "timestamp": now,
+        }
+
     def _fallback_option_chain(self, underlying: str, expiry: str) -> OptionChainSnapshot:
         now = datetime.now(timezone.utc)
         base_map = {
@@ -371,7 +429,7 @@ class MarketDataService:
         return "Broker connection unavailable."
 
     def is_reconnecting(self) -> bool:
-        return self._reconnecting or self._ws.state().reconnecting
+        return self._reconnecting
 
     def last_error(self) -> str:
         return self._last_error

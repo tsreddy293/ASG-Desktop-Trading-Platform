@@ -5,7 +5,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from src.brokers.fivepaisa.market_data_service import MarketDataService
+from src.marketdata.service import MarketDataService, market_data_service
 
 
 class DashboardViewModel(QObject):
@@ -18,7 +18,7 @@ class DashboardViewModel(QObject):
 
     def __init__(self, market_data_service: MarketDataService | None = None, refresh_seconds: int = 4) -> None:
         super().__init__()
-        self._service = market_data_service or MarketDataService()
+        self._service = market_data_service or market_data_service
         self.refresh_seconds = max(2, int(refresh_seconds))
         self._latest_indices: dict[str, dict[str, Any]] = {}
 
@@ -54,7 +54,28 @@ class DashboardViewModel(QObject):
 
     def get_quote(self, symbol: str) -> dict[str, Any] | None:
         try:
-            return self._service.get_quote(symbol)
+            row = self._service.get_quote(symbol)
+            if row is None:
+                return None
+            if isinstance(row, dict):
+                return row
+            return {
+                "symbol": getattr(row, "symbol", str(symbol or "").upper()),
+                "company": getattr(row, "company", str(symbol or "").upper()),
+                "sector": getattr(row, "sector", "Unknown"),
+                "exchange": getattr(row, "exchange", "NSE"),
+                "ltp": getattr(row, "ltp", 0.0),
+                "open": getattr(row, "open", 0.0),
+                "high": getattr(row, "high", 0.0),
+                "low": getattr(row, "low", 0.0),
+                "close": getattr(row, "previous_close", 0.0),
+                "change": getattr(row, "change", 0.0),
+                "change_percent": getattr(row, "change_percent", 0.0),
+                "volume": getattr(row, "volume", 0),
+                "bid": getattr(row, "bid", 0.0),
+                "ask": getattr(row, "ask", 0.0),
+                "timestamp": getattr(row, "timestamp", None),
+            }
         except Exception as exc:
             self.log_added.emit(f"{datetime.now().strftime('%H:%M:%S')} quote error for {symbol}: {exc}")
             return None

@@ -318,8 +318,11 @@ class MarketDataService:
                 app_logger.warning(f"5paisa API HTTP error {exc.code} on attempt {attempt}: {error_text}")
                 if exc.code in {401, 403}:
                     self._session_manager.clear()
-                    if self._broker_client.try_reauthenticate_from_env():
+                    try:
+                        self._broker_client.ensure_authenticated()
                         continue
+                    except Exception:
+                        pass
                     raise BrokerConnectionError("Broker API error: unauthorized") from exc
                 if exc.code in {408, 429, 500, 502, 503, 504} and attempt < self._retry_attempts:
                     sleep(0.2 * attempt)
