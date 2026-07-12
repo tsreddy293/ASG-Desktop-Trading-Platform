@@ -22,6 +22,8 @@ class ChartWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self._payload: ChartPayload | None = None
         self._hover_pos: QPoint | None = None
         self._drag_start: QPoint | None = None
@@ -33,6 +35,7 @@ class ChartWidget(QWidget):
         self._drawings: list[DrawingObject] = []
         self._drawing_start: QPoint | None = None
         self._drawing_preview_end: QPoint | None = None
+        self._drawing_text_default = "Note"
 
     def set_payload(self, payload: ChartPayload) -> None:
         self._payload = payload
@@ -47,6 +50,11 @@ class ChartWidget(QWidget):
 
     def clear_drawings(self) -> None:
         self._drawings.clear()
+        self.update()
+
+    def reset_zoom(self) -> None:
+        self._zoom = 1.0
+        self._pan_offset = 0
         self.update()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -113,6 +121,8 @@ class ChartWidget(QWidget):
         max_start = max(0, len(candles) - visible)
         start = max(0, min(max_start, max_start - self._pan_offset))
         view = candles[start : start + visible]
+        max_points = max(120, int(max(120.0, self.width() - 160)))
+        draw_view = self._decimate_if_needed(view, max_points=max_points)
 
         chart_left = 54
         chart_top = 24
@@ -127,29 +137,57 @@ class ChartWidget(QWidget):
         self._draw_grid(painter, price_area)
         self._draw_grid(painter, vol_area)
 
-        max_price = max(c.high for c in view)
-        min_price = min(c.low for c in view)
+        max_price = max(c.high for c in draw_view)
+        min_price = min(c.low for c in draw_view)
         prange = max(0.01, max_price - min_price)
-        max_vol = max(c.volume for c in view)
+        max_vol = max(c.volume for c in draw_view)
 
-        step_x = price_area.width() / max(1, len(view))
+        step_x = price_area.width() / max(1, len(draw_view))
         body_w = max(3.0, step_x * 0.58)
 
         if self._chart_type == "Candlestick":
-            self._draw_candles(painter, view, price_area, vol_area, max_price, prange, max_vol, step_x, body_w)
+            self._draw_candles(painter, draw_view, price_area, vol_area, max_price, prange, max_vol, step_x, body_w)
         elif self._chart_type == "Line":
-            self._draw_line_chart(painter, view, price_area, max_price, prange, step_x)
-            self._draw_volume_bars(painter, view, vol_area, max_vol, step_x, body_w)
+            self._draw_line_chart(painter, draw_view, price_area, max_price, prange, step_x)
+            self._draw_volume_bars(painter, draw_view, vol_area, max_vol, step_x, body_w)
+        elif self._chart_type == "OHLC":
+            self._draw_ohlc_chart(painter, draw_view, price_area, vol_area, max_price, prange, max_vol, step_x)
+        elif self._chart_type == "Heikin Ashi":
+            ha = self._to_heikin_ashi(draw_view)
+            self._draw_candles(painter, ha, price_area, vol_area, max_price, prange, max_vol, step_x, body_w)
         else:
-            self._draw_area_chart(painter, view, price_area, max_price, prange, step_x)
-            self._draw_volume_bars(painter, view, vol_area, max_vol, step_x, body_w)
+            self._draw_area_chart(painter, draw_view, price_area, max_price, prange, step_x)
+            self._draw_volume_bars(painter, draw_view, vol_area, max_vol, step_x, body_w)
 
-        self._draw_indicator_lines(painter, payload, view, start, price_area, max_price, prange, step_x)
-        self._draw_axes(painter, view, price_area, vol_area, max_price, min_price)
+        self._draw_indicator_lines(painter, payload, draw_view, start, price_area, max_price, prange, step_x)
+        self._draw_axes(painter, draw_view, price_area, vol_area, max_price, min_price)
         self._draw_last_price_line(painter, payload.last_price, price_area, max_price, prange)
-        self._draw_ohlc_hover(painter, view, price_area, step_x)
+        self._draw_ohlc_hover(painter, draw_view, price_area, step_x)
         self._draw_drawings(painter)
         self._draw_preview_drawing(painter)
+
+    @staticmethod
+    def _decimate_if_needed(candles, max_points: int):
+        if len(candles) <= max_points:
+            return candles
+        stride = max(1, (len(candles) + max_points - 1) // max_points)
+        return [candles[i] for i in range(0, len(candles), stride)]
+
+    def _to_heikin_ashi(self, candles):
+        if not candles:
+            return candles
+        converted = []
+        prev_open = candles[0].open
+        prev_close = candles[0].close
+        for candle in candles:
+            ha_close = (candle.open + candle.high + candle.low + candle.close) / 4
+            ha_open = (prev_open + prev_close) / 2
+            ha_high = max(candle.high, ha_open, ha_close)
+            ha_low = min(candle.low, ha_open, ha_close)
+            converted.append(type(candle)(timestamp=candle.timestamp, open=ha_open, high=ha_high, low=ha_low, close=ha_close, volume=candle.volume))
+            prev_open = ha_open
+            prev_close = ha_close
+        return converted
 
     def _draw_candles(self, painter: QPainter, view, price_area: QRectF, vol_area: QRectF, max_price: float, prange: float, max_vol: int, step_x: float, body_w: float) -> None:
         for idx, candle in enumerate(view):
@@ -180,6 +218,24 @@ class ChartWidget(QWidget):
             if prev is not None:
                 painter.drawLine(int(prev[0]), int(prev[1]), int(x), int(y))
             prev = (x, y)
+
+    def _draw_ohlc_chart(self, painter: QPainter, view, price_area: QRectF, vol_area: QRectF, max_price: float, prange: float, max_vol: int, step_x: float) -> None:
+        for idx, candle in enumerate(view):
+            x = price_area.left() + idx * step_x + step_x / 2
+            y_high = price_area.top() + ((max_price - candle.high) / prange) * price_area.height()
+            y_low = price_area.top() + ((max_price - candle.low) / prange) * price_area.height()
+            y_open = price_area.top() + ((max_price - candle.open) / prange) * price_area.height()
+            y_close = price_area.top() + ((max_price - candle.close) / prange) * price_area.height()
+
+            bullish = candle.close >= candle.open
+            color = QColor("#22c55e") if bullish else QColor("#ef4444")
+            painter.setPen(QPen(color, 1.2))
+            painter.drawLine(int(x), int(y_high), int(x), int(y_low))
+            painter.drawLine(int(x - 4), int(y_open), int(x), int(y_open))
+            painter.drawLine(int(x), int(y_close), int(x + 4), int(y_close))
+
+            vol_h = (candle.volume / max_vol) * vol_area.height() if max_vol > 0 else 0
+            painter.fillRect(QRectF(x - 1.5, vol_area.bottom() - vol_h, 3.0, vol_h), QColor("#38bdf8" if bullish else "#f97316"))
 
     def _draw_area_chart(self, painter: QPainter, view, price_area: QRectF, max_price: float, prange: float, step_x: float) -> None:
         from PySide6.QtGui import QPainterPath
@@ -296,6 +352,7 @@ class ChartWidget(QWidget):
         )
         painter.setPen(QColor("#e2e8f0"))
         painter.drawText(int(area.left()), 16, text)
+        painter.drawText(self._hover_pos.x() + 8, self._hover_pos.y() - 8, f"{candle.close:,.2f}")
 
     def _draw_drawings(self, painter: QPainter) -> None:
         painter.setPen(QPen(QColor("#f8fafc"), 1.4))
@@ -318,3 +375,19 @@ class ChartWidget(QWidget):
         elif tool == "Rectangle":
             rect = QRectF(start.x(), start.y(), end.x() - start.x(), end.y() - start.y()).normalized()
             painter.drawRect(rect)
+        elif tool == "Text":
+            painter.drawText(start, self._drawing_text_default)
+        elif tool == "Arrow":
+            painter.drawLine(start, end)
+            dx = end.x() - start.x()
+            dy = end.y() - start.y()
+            if dx == 0 and dy == 0:
+                return
+            length = max(1.0, (dx * dx + dy * dy) ** 0.5)
+            ux = dx / length
+            uy = dy / length
+            head = 10.0
+            left = QPoint(int(end.x() - head * ux + head * 0.5 * uy), int(end.y() - head * uy - head * 0.5 * ux))
+            right = QPoint(int(end.x() - head * ux - head * 0.5 * uy), int(end.y() - head * uy + head * 0.5 * ux))
+            painter.drawLine(end, left)
+            painter.drawLine(end, right)

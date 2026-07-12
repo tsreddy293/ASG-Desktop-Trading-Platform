@@ -79,6 +79,24 @@ def test_chart_viewmodel_maps_timeframes_and_updates_request() -> None:
     vm.set_timeframe("1H")
     assert fake.request["timeframe"] == "1 Hour"
 
+    vm.set_timeframe("3m")
+    assert fake.request["timeframe"] == "3 Minute"
+
+    vm.set_timeframe("10m")
+    assert fake.request["timeframe"] == "10 Minute"
+
+    vm.set_timeframe("2H")
+    assert fake.request["timeframe"] == "2 Hour"
+
+    vm.set_timeframe("4H")
+    assert fake.request["timeframe"] == "4 Hour"
+
+    vm.set_timeframe("1W")
+    assert fake.request["timeframe"] == "Weekly"
+
+    vm.set_timeframe("1M")
+    assert fake.request["timeframe"] == "Monthly"
+
 
 def test_chart_viewmodel_indicator_toggle_and_refresh() -> None:
     fake = _FakeRefreshService()
@@ -86,6 +104,11 @@ def test_chart_viewmodel_indicator_toggle_and_refresh() -> None:
 
     vm.set_indicator("MACD", True)
     assert "MACD" in fake.request["indicators"]
+
+    vm.set_indicator("ATR", True)
+    vm.set_indicator("ADX", True)
+    assert "ATR" in fake.request["indicators"]
+    assert "ADX" in fake.request["indicators"]
 
     vm.set_indicator("EMA", False)
     assert "EMA" not in fake.request["indicators"]

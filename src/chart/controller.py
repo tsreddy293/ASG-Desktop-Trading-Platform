@@ -17,6 +17,7 @@ class ChartController:
         self._view.chart_type_changed.connect(self._view.set_chart_type)
         self._view.drawing_tool_changed.connect(self._view.set_drawing_tool)
         self._view.clear_drawings_requested.connect(self._view.clear_drawings)
+        self._view.reset_zoom_requested.connect(self._view.reset_zoom)
         self._view.auto_refresh_toggled.connect(self._viewmodel.set_auto_refresh)
         self._view.refresh_requested.connect(self._viewmodel.refresh_now)
 

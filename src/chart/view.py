@@ -27,6 +27,7 @@ class ChartView(QWidget):
     chart_type_changed = Signal(str)
     drawing_tool_changed = Signal(str)
     clear_drawings_requested = Signal()
+    reset_zoom_requested = Signal()
     auto_refresh_toggled = Signal(bool)
     refresh_requested = Signal()
 
@@ -61,7 +62,7 @@ class ChartView(QWidget):
         row1.addSpacing(12)
         row1.addWidget(QLabel("Type"))
         self.chart_type_group = QButtonGroup(self)
-        for name in ["Candlestick", "Line", "Area"]:
+        for name in ["Candlestick", "Line", "Area", "OHLC", "Heikin Ashi"]:
             button = QPushButton(name)
             button.setCheckable(True)
             if name == "Candlestick":
@@ -77,7 +78,7 @@ class ChartView(QWidget):
         row1.addSpacing(12)
         row1.addWidget(QLabel("Draw"))
         self.tool_group = QButtonGroup(self)
-        for name in ["None", "Trend Line", "Horizontal Line", "Vertical Line", "Rectangle"]:
+        for name in ["None", "Trend Line", "Horizontal Line", "Vertical Line", "Rectangle", "Text", "Arrow"]:
             button = QPushButton(name)
             button.setCheckable(True)
             if name == "None":
@@ -93,6 +94,10 @@ class ChartView(QWidget):
         self.clear_draw_btn = QPushButton("Clear Drawings")
         self.clear_draw_btn.clicked.connect(self.clear_drawings_requested.emit)
         row1.addWidget(self.clear_draw_btn)
+
+        self.reset_zoom_btn = QPushButton("Reset Zoom")
+        self.reset_zoom_btn.clicked.connect(self.reset_zoom_requested.emit)
+        row1.addWidget(self.reset_zoom_btn)
 
         row1.addStretch()
 
@@ -112,7 +117,7 @@ class ChartView(QWidget):
         tf_group = QButtonGroup(self)
         tf_group.setExclusive(True)
         self._tf_buttons: dict[str, QPushButton] = {}
-        for tf in ["1m", "5m", "15m", "30m", "1H", "1D"]:
+        for tf in ["1m", "3m", "5m", "10m", "15m", "30m", "1H", "2H", "4H", "1D", "1W", "1M"]:
             button = QPushButton(tf)
             button.setCheckable(True)
             button.setStyleSheet(
@@ -133,7 +138,7 @@ class ChartView(QWidget):
         indicators_layout.setContentsMargins(0, 0, 0, 0)
         indicators_layout.setSpacing(8)
         self._indicator_boxes: dict[str, QCheckBox] = {}
-        for name in ["EMA", "SMA", "VWAP", "RSI", "MACD", "SuperTrend", "Bollinger Bands"]:
+        for name in ["EMA", "SMA", "VWAP", "RSI", "MACD", "Bollinger Bands", "ATR", "ADX", "SuperTrend"]:
             box = QCheckBox(name)
             box.setStyleSheet("QCheckBox { color: #cbd5e1; }")
             box.setChecked(name in {"EMA", "SMA", "VWAP"})
@@ -197,6 +202,9 @@ class ChartView(QWidget):
 
     def clear_drawings(self) -> None:
         self.chart_widget.clear_drawings()
+
+    def reset_zoom(self) -> None:
+        self.chart_widget.reset_zoom()
 
     def set_status(self, status_text: str, updated_text: str) -> None:
         self.connection_label.setText(status_text)
