@@ -13,6 +13,9 @@ class FivePaisaLoginService:
         self._client = None
 
     def login(self) -> None:
+        if self._broker_client.authentication_in_progress():
+            app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
+            return
         # Auto-authenticates via OAuth callback flow when no valid session exists.
         self._broker_client.ensure_authenticated()
         app_logger.info("5paisa session validated")

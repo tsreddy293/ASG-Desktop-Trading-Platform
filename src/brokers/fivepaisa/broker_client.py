@@ -27,6 +27,9 @@ class _OAuthCallbackState:
     request_token: str = ""
     callback_url: str = ""
     server: HTTPServer | None = None
+    authenticated: bool = False
+    auth_error: str = ""
+    completed: bool = False
 
 
 class FivePaisaBrokerClient:
@@ -40,11 +43,19 @@ class FivePaisaBrokerClient:
         self._auth_service = auth_service or FivePaisaAuthService()
         self._session_manager = session_manager or FivePaisaSessionManager()
         self._auth_lock = Lock()
+        self._authentication_in_progress = False
+        self._session_manager.set_refresh_callback(self.try_reauthenticate_from_env)
+        self._session_manager.set_reachability_callback(self._is_session_reachable)
+        self._session_manager.start_validation()
+
+    def authentication_in_progress(self) -> bool:
+        return bool(self._authentication_in_progress)
 
     def generate_login_url(self) -> str:
         return self._auth_service.generate_login_url()
 
     def authenticate_from_callback(self, callback_url: str) -> AuthResult:
+        self._session_manager.mark_connecting()
         request_token = self._auth_service.extract_request_token(callback_url)
         token_response = self._auth_service.exchange_request_token(request_token)
         self._session_manager.set_session(
@@ -52,6 +63,7 @@ class FivePaisaBrokerClient:
             refresh_token=token_response.refresh_token,
             client_code=token_response.client_code,
             status=token_response.status,
+            user_id=os.getenv("FIVEPAISA_USER_ID", "").strip(),
         )
         app_logger.info("Login successful")
         return AuthResult(
@@ -62,12 +74,14 @@ class FivePaisaBrokerClient:
         )
 
     def reauthenticate_from_request_token(self, request_token: str) -> AuthResult:
+        self._session_manager.mark_connecting()
         token_response = self._auth_service.exchange_request_token(request_token)
         self._session_manager.set_session(
             access_token=token_response.access_token,
             refresh_token=token_response.refresh_token,
             client_code=token_response.client_code,
             status=token_response.status,
+            user_id=os.getenv("FIVEPAISA_USER_ID", "").strip(),
         )
         app_logger.info("Access Token generated")
         app_logger.info("Login successful")
@@ -86,20 +100,37 @@ class FivePaisaBrokerClient:
         return True
 
     def ensure_authenticated(self) -> BrokerSession:
+        if self._session_manager.state().value == "Connected":
+            app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
+            return self._session_manager.require_valid_session()
+
         session = self._session_manager.get_session()
         if session is not None and not self._session_manager.needs_refresh():
+            app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
             return self._session_manager.require_valid_session()
 
         with self._auth_lock:
             session = self._session_manager.get_session()
             if session is not None and not self._session_manager.needs_refresh():
+                app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
+                return self._session_manager.require_valid_session()
+
+            if self._authentication_in_progress:
+                app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
                 return self._session_manager.require_valid_session()
 
             app_logger.warning("5paisa access token expired or missing; authenticating automatically")
-            if self.try_reauthenticate_from_env():
-                return self._session_manager.require_valid_session()
-
-            self._authenticate_via_oauth_flow()
+            self._session_manager.mark_connecting()
+            try:
+                self._authentication_in_progress = True
+                if self._session_manager.refresh_if_needed(force=True):
+                    return self._session_manager.require_valid_session()
+                self._authenticate_via_oauth_flow()
+            except Exception:
+                self._session_manager.clear()
+                raise
+            finally:
+                self._authentication_in_progress = False
             return self._session_manager.require_valid_session()
 
     def logout(self) -> None:
@@ -116,6 +147,18 @@ class FivePaisaBrokerClient:
         return self._session_manager
 
     def _authenticate_via_oauth_flow(self) -> None:
+        if self._authentication_in_progress is False:
+            self._authentication_in_progress = True
+
+        if self._session_manager.state().value == "Connected":
+            app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
+            return
+
+        session = self._session_manager.get_session()
+        if session is not None and not self._session_manager.needs_refresh():
+            app_logger.info("LOGIN_SKIPPED_ALREADY_CONNECTED")
+            return
+
         login_url = self.generate_login_url()
         callback_url = self._extract_callback_url(login_url)
 
@@ -135,6 +178,7 @@ class FivePaisaBrokerClient:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
+        app_logger.info("LOGIN_STARTED")
         app_logger.info(f"5paisa callback server listening on http://{host}:{port}{callback_path}")
         webbrowser.open(login_url, new=2)
         app_logger.info("Waiting for 5paisa OAuth callback")
@@ -142,15 +186,29 @@ class FivePaisaBrokerClient:
         try:
             if not state.event.wait(timeout=300):
                 raise BrokerConnectionError("Broker connection unavailable.")
+            if state.auth_error:
+                self._session_manager.clear()
+                raise BrokerConnectionError("Broker connection unavailable.")
+            if state.authenticated:
+                self._authentication_in_progress = False
+                return
             if not state.request_token:
+                self._session_manager.clear()
                 raise BrokerConnectionError("Broker connection unavailable.")
             self.reauthenticate_from_request_token(state.request_token)
+            self._authentication_in_progress = False
         finally:
             try:
                 server.shutdown()
             except Exception:
                 pass
             server.server_close()
+
+    def _is_session_reachable(self) -> bool:
+        session = self._session_manager.get_session()
+        if session is None:
+            return False
+        return not self._session_manager.needs_refresh()
 
     @staticmethod
     def _extract_callback_url(login_url: str) -> str:
@@ -162,8 +220,7 @@ class FivePaisaBrokerClient:
             raise BrokerConnectionError("Broker connection unavailable.")
         return callback_url
 
-    @staticmethod
-    def _build_callback_handler(state: _OAuthCallbackState, host: str, port: int, callback_path: str):
+    def _build_callback_handler(self, state: _OAuthCallbackState, host: str, port: int, callback_path: str):
         class _CallbackHandler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
@@ -178,8 +235,19 @@ class FivePaisaBrokerClient:
                 token_values = params.get("RequestToken", [])
                 token = token_values[0].strip() if token_values else ""
                 if token:
+                    app_logger.info("CALLBACK_RECEIVED")
                     state.request_token = token
                     state.callback_url = f"http://{host}:{port}{callback_path}?{parsed.query}"
+                    if not state.completed:
+                        try:
+                            self._outer_client.reauthenticate_from_request_token(token)  # type: ignore[attr-defined]
+                            state.authenticated = True
+                            app_logger.info("TOKEN_EXCHANGED")
+                            app_logger.info("SESSION_CONNECTED")
+                        except Exception as exc:
+                            state.auth_error = str(exc)
+                        finally:
+                            state.completed = True
                     state.event.set()
 
                 self.send_response(200)
@@ -202,4 +270,5 @@ class FivePaisaBrokerClient:
             def log_message(self, fmt: str, *args) -> None:
                 return
 
+        _CallbackHandler._outer_client = self
         return _CallbackHandler

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from threading import Thread
+from typing import Generator
 
 import pytest
 
 from src.brokers.base_broker import BrokerConnectionError
 from src.brokers.fivepaisa.auth_service import FivePaisaAuthService
 from src.brokers.fivepaisa.broker_client import FivePaisaBrokerClient
+from src.brokers.fivepaisa.login import FivePaisaLoginService
 from src.brokers.fivepaisa.session_manager import BrokerSession, FivePaisaSessionManager
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_singleton() -> Generator[None, None, None]:
+    FivePaisaSessionManager._reset_singleton_for_tests()
+    yield
+    FivePaisaSessionManager._reset_singleton_for_tests()
 
 
 def _set_required_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -123,3 +133,55 @@ def test_broker_client_ensure_authenticated_raises_when_expired() -> None:
     with pytest.raises(BrokerConnectionError):
         client._authenticate_via_oauth_flow = lambda: (_ for _ in ()).throw(BrokerConnectionError("Broker connection unavailable."))
         client.ensure_authenticated()
+
+
+def test_ensure_authenticated_logs_skip_when_connected(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = FivePaisaSessionManager()
+    manager.set_session("token", "client", "Success")
+    client = FivePaisaBrokerClient(auth_service=FivePaisaAuthService(), session_manager=manager)
+    logs: list[str] = []
+
+    monkeypatch.setattr("src.brokers.fivepaisa.broker_client.app_logger.info", lambda message: logs.append(str(message)))
+
+    _ = client.ensure_authenticated()
+
+    assert any("LOGIN_SKIPPED_ALREADY_CONNECTED" in row for row in logs)
+
+
+def test_duplicate_oauth_windows_are_prevented() -> None:
+    manager = FivePaisaSessionManager()
+    client = FivePaisaBrokerClient(auth_service=FivePaisaAuthService(), session_manager=manager)
+    calls = {"oauth": 0}
+
+    def _fake_oauth_flow() -> None:
+        calls["oauth"] += 1
+        manager.set_session("token", "client", "Success")
+
+    client._authenticate_via_oauth_flow = _fake_oauth_flow  # type: ignore[method-assign]
+
+    worker_1 = Thread(target=client.ensure_authenticated)
+    worker_2 = Thread(target=client.ensure_authenticated)
+    worker_1.start()
+    worker_2.start()
+    worker_1.join()
+    worker_2.join()
+
+    assert calls["oauth"] == 1
+
+
+def test_login_service_skips_when_authentication_in_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = FivePaisaLoginService()
+    monkeypatch.setattr(service._broker_client, "authentication_in_progress", lambda: True)
+    called = {"ensure": 0}
+    logs: list[str] = []
+
+    def _fake_ensure() -> None:
+        called["ensure"] += 1
+
+    monkeypatch.setattr(service._broker_client, "ensure_authenticated", _fake_ensure)
+    monkeypatch.setattr("src.brokers.fivepaisa.login.app_logger.info", lambda message: logs.append(str(message)))
+
+    service.login()
+
+    assert called["ensure"] == 0
+    assert any("LOGIN_SKIPPED_ALREADY_CONNECTED" in row for row in logs)
