@@ -3,6 +3,8 @@ __all__ = [
     "market_data_service",
     "MarketCache",
     "OrderService",
+    "OrderValidator",
+    "ValidationContext",
     "WebSocketService",
 ]
 
@@ -20,6 +22,10 @@ def __getattr__(name: str):
         from src.services.order_service import OrderService
 
         return OrderService
+    if name in {"OrderValidator", "ValidationContext"}:
+        from src.services.order_validator import OrderValidator, ValidationContext
+
+        return OrderValidator if name == "OrderValidator" else ValidationContext
     if name == "WebSocketService":
         from src.services.websocket_service import WebSocketService
 

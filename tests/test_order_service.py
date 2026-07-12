@@ -93,16 +93,17 @@ def test_order_service_place_modify_cancel_and_books() -> None:
         quantity=2,
         price=0,
         trigger_price=0,
-        order_type="MARKET",
+        order_type="BRACKET ORDER",
         product="CNC",
         validity="DAY",
+        variety="AMO",
     )
     assert placed["ok"] is True
     assert placed["order_id"] == "OID-1"
 
     modified = service.modify_order(order_id="OID-1", quantity=5, price=821.2)
     assert modified["order_id"] == "OID-1"
-    assert modified["status"] == "MODIFIED"
+    assert modified["status"] == "OPEN"
 
     cancelled = service.cancel_order(order_id="OID-1")
     assert cancelled["order_id"] == "OID-1"
@@ -117,6 +118,17 @@ def test_order_service_place_modify_cancel_and_books() -> None:
     assert len(trades) == 1
     assert trades[0]["trade_id"] == "T-11"
     assert trades[0]["side"] == "BUY"
+
+
+def test_order_service_normalizes_status_values() -> None:
+    service = OrderService(backend=_FakeBroker())
+
+    assert service._normalize_status("Placed") == "PENDING"
+    assert service._normalize_status("Open") == "OPEN"
+    assert service._normalize_status("Complete") == "EXECUTED"
+    assert service._normalize_status("Rejected") == "REJECTED"
+    assert service._normalize_status("Cancelled") == "CANCELLED"
+    assert service._normalize_status("Partially Filled") == "PARTIAL FILLED"
 
 
 def test_order_service_retries_once_on_timeout() -> None:

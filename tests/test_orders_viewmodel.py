@@ -56,6 +56,9 @@ def test_orders_viewmodel_emits_update_and_action_signals() -> None:
     vm.modify_order(order_id="OID-1", quantity=2, price=801.5)
     vm.cancel_order("OID-1")
 
+    vm.set_search_query("SBI")
+    vm.set_status_filter("PENDING")
+
     assert len(seen_orders) >= 1
     assert len(seen_trades) >= 1
     assert seen_placed[-1]["status"] == "PLACED"
@@ -77,3 +80,15 @@ def test_orders_viewmodel_emits_error_signal_on_failure() -> None:
     vm.cancel_order("OID-1")
 
     assert len(errors) >= 4
+
+
+def test_orders_viewmodel_validation_error_emitted() -> None:
+    service = _FakeOrderService()
+    vm = OrdersViewModel(service=service)
+
+    errors = []
+    vm.errorOccurred.connect(errors.append)
+
+    vm.place_order({"exchange": "NSE", "symbol": "SBIN", "side": "BUY", "quantity": 0, "order_type": "MARKET", "product": "CNC"})
+
+    assert errors

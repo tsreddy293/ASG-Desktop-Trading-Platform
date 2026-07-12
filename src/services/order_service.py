@@ -7,9 +7,18 @@ from typing import Any, Protocol
 from src.brokers import BrokerConnectionError, broker_manager
 
 
-_ORDER_TYPES = {"MARKET", "LIMIT", "SL", "SL-M"}
+_ORDER_TYPES = {
+    "MARKET",
+    "LIMIT",
+    "SL",
+    "SL-M",
+    "BRACKET ORDER",
+    "COVER ORDER",
+}
 _PRODUCT_TYPES = {"CNC", "MIS", "NRML"}
 _SIDES = {"BUY", "SELL"}
+_VALIDITIES = {"DAY", "IOC"}
+_VARIETIES = {"REGULAR", "AMO"}
 
 
 class BrokerOrdersBackend(Protocol):
@@ -57,6 +66,10 @@ class OrderService:
         order_type: str = "MARKET",
         product: str = "CNC",
         validity: str = "DAY",
+        variety: str = "REGULAR",
+        lot_size: int = 1,
+        auto_price: bool = False,
+        ltp: float = 0.0,
     ) -> dict[str, Any]:
         clean_exchange = self._clean_exchange(exchange)
         clean_symbol = self._clean_symbol(symbol)
@@ -64,9 +77,14 @@ class OrderService:
         clean_order_type = self._clean_order_type(order_type)
         clean_product = self._clean_product(product)
         clean_validity = self._clean_validity(validity)
+        clean_variety = self._clean_variety(variety)
         clean_quantity = self._clean_quantity(quantity)
         clean_price = self._float_value(price)
         clean_trigger = self._float_value(trigger_price)
+        clean_lot_size = max(1, int(lot_size or 1))
+
+        if auto_price and clean_price <= 0:
+            clean_price = self._float_value(ltp)
 
         payload = {
             "exchange": clean_exchange,
@@ -78,6 +96,9 @@ class OrderService:
             "order_type": clean_order_type,
             "product": clean_product,
             "validity": clean_validity,
+            "variety": clean_variety,
+            "lot_size": clean_lot_size,
+            "auto_price": bool(auto_price),
         }
 
         raw = self._with_retry(self._backend.place_order, **payload)
@@ -171,7 +192,7 @@ class OrderService:
             or fallback_order_id
         )
         status_raw = str(payload.get("status") or payload.get("Status") or payload.get("message") or payload.get("Message") or "")
-        status = status_raw.strip().upper() or ({"place": "PLACED", "modify": "MODIFIED", "cancel": "CANCELLED"}.get(action, "SUCCESS"))
+        status = OrderService._normalize_status(status_raw.strip().upper() or ({"place": "PENDING", "modify": "OPEN", "cancel": "CANCELLED"}.get(action, "OPEN")))
         ok = status not in {"FAILED", "REJECTED", "ERROR"}
         message = str(payload.get("message") or payload.get("Message") or status.title())
         return {
@@ -207,7 +228,7 @@ class OrderService:
             "executed_qty": executed_qty,
             "pending_qty": pending_qty,
             "price": self._float_value(payload.get("price") or payload.get("Price") or payload.get("rate") or payload.get("LimitPrice")),
-            "status": str(payload.get("status") or payload.get("Status") or "UNKNOWN").upper(),
+            "status": self._normalize_status(str(payload.get("status") or payload.get("Status") or "UNKNOWN").upper()),
             "time": order_time.strftime("%H:%M:%S") if order_time else "--",
             "raw": payload,
             "sort_time": order_time or datetime.min,
@@ -276,6 +297,10 @@ class OrderService:
     @staticmethod
     def _clean_order_type(order_type: Any) -> str:
         text = str(order_type or "MARKET").strip().upper()
+        if text == "BRACKET":
+            text = "BRACKET ORDER"
+        if text == "COVER":
+            text = "COVER ORDER"
         if text not in _ORDER_TYPES:
             raise OrderServiceError("validation_error", "Unsupported order type")
         return text
@@ -290,7 +315,16 @@ class OrderService:
     @staticmethod
     def _clean_validity(validity: Any) -> str:
         text = str(validity or "DAY").strip().upper()
+        if text not in _VALIDITIES:
+            raise OrderServiceError("validation_error", "Unsupported validity")
         return text or "DAY"
+
+    @staticmethod
+    def _clean_variety(variety: Any) -> str:
+        text = str(variety or "REGULAR").strip().upper()
+        if text not in _VARIETIES:
+            raise OrderServiceError("validation_error", "Unsupported variety")
+        return text
 
     @staticmethod
     def _clean_quantity(quantity: Any) -> int:
@@ -319,3 +353,20 @@ class OrderService:
             return int(value or 0)
         except Exception:
             return 0
+
+    @staticmethod
+    def _normalize_status(status: str) -> str:
+        text = str(status or "").strip().upper()
+        if text in {"PLACED", "PENDING", "PUT ORDER REQ RECEIVED", "REQUESTED"}:
+            return "PENDING"
+        if text in {"OPEN", "TRIGGER PENDING", "MODIFIED"}:
+            return "OPEN"
+        if text in {"COMPLETE", "EXECUTED", "FILLED", "SUCCESS"}:
+            return "EXECUTED"
+        if text in {"REJECTED", "FAILED", "ERROR"}:
+            return "REJECTED"
+        if text in {"CANCELLED", "CANCELED"}:
+            return "CANCELLED"
+        if text in {"PARTIAL", "PARTIALLY FILLED", "PARTIAL FILLED"}:
+            return "PARTIAL FILLED"
+        return text or "PENDING"
