@@ -10,6 +10,7 @@ from src.brokers.base_broker import BrokerConnectionError
 from src.brokers.fivepaisa.auth_service import FivePaisaAuthService
 from src.brokers.fivepaisa.broker_client import FivePaisaBrokerClient
 from src.brokers.fivepaisa.login import FivePaisaLoginService
+from src.brokers.fivepaisa.market import FivePaisaMarketService
 from src.brokers.fivepaisa.session_manager import BrokerSession, FivePaisaSessionManager
 
 
@@ -185,3 +186,19 @@ def test_login_service_skips_when_authentication_in_progress(monkeypatch: pytest
 
     assert called["ensure"] == 0
     assert any("LOGIN_SKIPPED_ALREADY_CONNECTED" in row for row in logs)
+
+
+def test_historical_data_requires_ready_session_without_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = FivePaisaLoginService()
+    market = FivePaisaMarketService(service)
+
+    monkeypatch.setattr(service._broker_client.session_manager, "is_connected", lambda: False)
+    monkeypatch.setattr(service._broker_client, "authentication_in_progress", lambda: False)
+    monkeypatch.setattr(
+        market._market_data,
+        "get_historical_candles",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("historical request should not run")),
+    )
+
+    with pytest.raises(BrokerConnectionError, match="Session expired\\. Please click Connect\\."):
+        market.get_historical_data("SBIN", exchange="NSE", timeframe="15 Minute")

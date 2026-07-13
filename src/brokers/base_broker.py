@@ -12,6 +12,10 @@ class BrokerConnectionError(BrokerError):
     """Raised when broker connection or auth is unavailable."""
 
 
+class BrokerNotLoggedIn(BrokerConnectionError):
+    """Raised when broker APIs are called without an authenticated session."""
+
+
 class BaseBroker(ABC):
     """Abstract broker contract for all integrations."""
 

@@ -1,0 +1,19 @@
+{
+  "raw_callback_url": "http://localhost:8080/callback?RequestToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6IjUyODI4MDY0Iiwicm9sZSI6InZoMU5YbGs2SmhRdTZqV3JBcUFOTDBhcHVvZE9kZFZHIiwiU3RhdGUiOiJBU0ciLCJuYmYiOjE3ODM4NzQ3MjUsImV4cCI6MTc4Mzg3ODMyNSwiaWF0IjoxNzgzODc0NzI1fQ.Hpd3m-XoKd6SBlGAYM1yr88AFkQY9amDQ0wHnN9sKTk&state=ASG",
+  "raw_request_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6IjUyODI4MDY0Iiwicm9sZSI6InZoMU5YbGs2SmhRdTZqV3JBcUFOTDBhcHVvZE9kZFZHIiwiU3RhdGUiOiJBU0ciLCJuYmYiOjE3ODM4NzQ3MjUsImV4cCI6MTc4Mzg3ODMyNSwiaWF0IjoxNzgzODc0NzI1fQ.Hpd3m-XoKd6SBlGAYM1yr88AFkQY9amDQ0wHnN9sKTk",
+  "request_token_length": 259,
+  "sha256_after_extraction": "ad2b544311e7fa8c4af9bedff32f0ed918ac2378a09ef9e82c1397043c57c0f1",
+  "sha256_before_getaccesstoken": "ad2b544311e7fa8c4af9bedff32f0ed918ac2378a09ef9e82c1397043c57c0f1",
+  "hashes_identical": true,
+  "transform_checks": {
+    "urlparse_parse_qs_value_equals_passed_token": true,
+    "strip_changes_value": false,
+    "url_decoding_changes_value": false,
+    "replace_used": false,
+    "split_used_on_token": false,
+    "regex_used": false,
+    "serialization_used_before_exchange": false,
+    "token_passed_to_reauthenticate_equals_extracted": true,
+    "token_passed_to_exchange_equals_extracted": true
+  }
+}

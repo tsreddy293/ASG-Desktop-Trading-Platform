@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import inspect
+import threading
+import traceback
+from datetime import datetime, timezone
 from typing import Any
 
 from src.brokers.angelone import AngelOneBroker
@@ -131,6 +135,8 @@ class UnavailableBroker(BaseBroker):
 class BrokerManager:
     """Routes all broker calls to the active broker implementation."""
 
+    _login_trace_lock = threading.Lock()
+
     def __init__(self) -> None:
         self._brokers: dict[str, BaseBroker] = {
             "fivepaisa": FivePaisaBroker(),
@@ -172,6 +178,20 @@ class BrokerManager:
             raise BrokerConnectionError("Broker connection unavailable.") from exc
 
     def login(self) -> None:
+        # Compatibility alias; explicit connect is the canonical auth trigger.
+        self.connect()
+
+    def connect(self) -> None:
+        stack = inspect.stack(context=0)
+        frame = stack[1] if len(stack) > 1 else stack[0]
+        with self._login_trace_lock:
+            current = getattr(self, "_login_call_sequence", 0) + 1
+            self._login_call_sequence = current
+        app_logger.info(
+            f"AUTH_PROBE event=BrokerManager.connect seq={current} ts={datetime.now(timezone.utc).isoformat()} "
+            f"thread={threading.current_thread().name} caller_file={frame.filename} caller_line={frame.lineno}\n"
+            f"{''.join(traceback.format_stack(limit=10))}"
+        )
         self._safe_call("login")
 
     def logout(self) -> None:

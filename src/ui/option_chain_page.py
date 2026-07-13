@@ -98,7 +98,7 @@ class OptionChainPage(QWidget):
 
         layout.addWidget(context_panel)
 
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 17)
         self.table.setHorizontalHeaderLabels(
             [
                 t("option_chain.col.strike"),
@@ -110,6 +110,14 @@ class OptionChainPage(QWidget):
                 t("option_chain.col.pe_ltp"),
                 t("option_chain.iv"),
                 t("option_chain.pcr"),
+                "CE Bid",
+                "CE Ask",
+                "CE Vol",
+                "PE Bid",
+                "PE Ask",
+                "PE Vol",
+                "CE Delta",
+                "PE Delta",
             ]
         )
         self.table.setAlternatingRowColors(True)
@@ -126,8 +134,13 @@ class OptionChainPage(QWidget):
 
     def refresh_data(self) -> None:
         underlying = self.underlying_selector.currentText() or "NIFTY"
-        expiry = self.expiry_selector.currentText() or "31 Jul 2026"
+        expiry = self.expiry_selector.currentText() or ""
         snapshot = self._service.get_option_chain_snapshot(underlying, expiry)
+
+        if snapshot.expiries and not self.expiry_selector.currentText():
+            self._load_expiries(underlying)
+            expiry = self.expiry_selector.currentText() or (snapshot.expiries[0] if snapshot.expiries else "")
+            snapshot = self._service.get_option_chain_snapshot(underlying, expiry)
 
         self.spot_price_value.setText(f"{snapshot.spot_price:,.2f}")
         self.atm_strike_value.setText(f"{snapshot.atm_strike:,}")
@@ -146,6 +159,14 @@ class OptionChainPage(QWidget):
             self.table.setItem(row_index, 6, QTableWidgetItem(f"{row.pe_ltp:,.2f}"))
             self.table.setItem(row_index, 7, QTableWidgetItem(f"{row.iv:.2f}%"))
             self.table.setItem(row_index, 8, QTableWidgetItem(f"{row.pcr:.2f}"))
+            self.table.setItem(row_index, 9, QTableWidgetItem(f"{row.ce_bid:,.2f}"))
+            self.table.setItem(row_index, 10, QTableWidgetItem(f"{row.ce_ask:,.2f}"))
+            self.table.setItem(row_index, 11, QTableWidgetItem(f"{row.ce_volume:,}"))
+            self.table.setItem(row_index, 12, QTableWidgetItem(f"{row.pe_bid:,.2f}"))
+            self.table.setItem(row_index, 13, QTableWidgetItem(f"{row.pe_ask:,.2f}"))
+            self.table.setItem(row_index, 14, QTableWidgetItem(f"{row.pe_volume:,}"))
+            self.table.setItem(row_index, 15, QTableWidgetItem(f"{row.ce_delta:.4f}"))
+            self.table.setItem(row_index, 16, QTableWidgetItem(f"{row.pe_delta:.4f}"))
 
             if row.strike_price == snapshot.atm_strike:
                 for column in range(self.table.columnCount()):

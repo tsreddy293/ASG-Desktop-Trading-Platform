@@ -3,15 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import os
+import inspect
+import threading
 from threading import Event, RLock, Thread
 from time import sleep
 from typing import Callable
 
 from src.core.config import config
 from src.core.logger import app_logger
-from src.brokers import BrokerConnectionError, broker_manager
+from src.brokers import BrokerConnectionError, BrokerNotLoggedIn, broker_manager
+from src.brokers.fivepaisa.session_manager import LoginState
 from src.marketdata.model import HistoricalCandle, MarketDataEvent, MarketDepthLevel, MarketDepthSnapshot, MarketEventType, MarketInstrument, OptionChainRow, OptionChainSnapshot, OrderRecord, PortfolioPosition
 from src.services.market_cache import MarketCache
+from src.services.websocket_service import WebSocketService
 
 
 EventHandler = Callable[[MarketDataEvent], None]
@@ -37,6 +41,8 @@ class MarketDataService:
         "Monthly": (60 * 24 * 30, 72),
     }
 
+    _SESSION_EXPIRED_MESSAGE = "Session expired. Please click Connect."
+
     def __init__(self) -> None:
         self._broker_manager = broker_manager
         self.universe = ServiceUniverse()
@@ -49,6 +55,8 @@ class MarketDataService:
         self._quotes: dict[tuple[str, str], MarketInstrument] = {}
         self._reconnecting = False
         self._last_error = ""
+        self._websocket_client = None
+        self._websocket_service = WebSocketService(self._connect_websocket, self._disconnect_websocket, interval_seconds=self.refresh_interval_seconds)
 
     def start(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -56,11 +64,24 @@ class MarketDataService:
         self._stop.clear()
         self._worker = Thread(target=self._run, daemon=True)
         self._worker.start()
+        self._websocket_service.start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._worker is not None and self._worker.is_alive():
             self._worker.join(timeout=1.5)
+        self._websocket_service.stop()
+
+    def _connect_websocket(self) -> None:
+        if self._websocket_client is None:
+            from src.market.websocket_client import WebSocketClient
+
+            self._websocket_client = WebSocketClient(url="ws://127.0.0.1/asg-market")
+        self._websocket_client.start()
+
+    def _disconnect_websocket(self) -> None:
+        if self._websocket_client is not None:
+            self._websocket_client.stop()
 
     def subscribe(self, handler: EventHandler) -> None:
         with self._lock:
@@ -76,7 +97,7 @@ class MarketDataService:
         ex = (exchange or "NSE").upper()
         query = (symbol_query or "").strip().lower()
         rows = [item for (item_exchange, _), item in self._quotes.items() if item_exchange == ex]
-        if not rows:
+        if not rows and self._last_error != self._SESSION_EXPIRED_MESSAGE:
             rows = self._fallback_live_quotes(ex)
         if query:
             rows = [row for row in rows if query in row.symbol.lower() or query in row.company.lower()]
@@ -86,6 +107,8 @@ class MarketDataService:
         found = self._quotes.get((exchange.upper(), symbol.upper()))
         if found is not None:
             return found
+        if self._last_error == self._SESSION_EXPIRED_MESSAGE:
+            return None
         fallback = {row.symbol: row for row in self._fallback_live_quotes(exchange.upper())}
         return fallback.get(symbol.upper())
 
@@ -160,6 +183,10 @@ class MarketDataService:
             self._cache.set(key, depth)
             return depth
         except BrokerConnectionError as exc:
+            if isinstance(exc, BrokerNotLoggedIn):
+                self._reconnecting = True
+                self._last_error = self._SESSION_EXPIRED_MESSAGE
+                raise
             cached = self._cache.get(key)
             if cached is not None:
                 self._reconnecting = True
@@ -191,6 +218,24 @@ class MarketDataService:
                     pcr=float(row.get("pcr", 0.0) or 0.0),
                     ce_change_oi=int(row.get("ce_change_oi", 0) or 0),
                     pe_change_oi=int(row.get("pe_change_oi", 0) or 0),
+                    ce_volume=int(row.get("ce_volume", 0) or 0),
+                    pe_volume=int(row.get("pe_volume", 0) or 0),
+                    ce_bid=float(row.get("ce_bid", 0.0) or 0.0),
+                    ce_ask=float(row.get("ce_ask", 0.0) or 0.0),
+                    pe_bid=float(row.get("pe_bid", 0.0) or 0.0),
+                    pe_ask=float(row.get("pe_ask", 0.0) or 0.0),
+                    ce_iv=float(row.get("ce_iv", 0.0) or 0.0),
+                    pe_iv=float(row.get("pe_iv", 0.0) or 0.0),
+                    ce_delta=float(row.get("ce_delta", 0.0) or 0.0),
+                    ce_gamma=float(row.get("ce_gamma", 0.0) or 0.0),
+                    ce_theta=float(row.get("ce_theta", 0.0) or 0.0),
+                    ce_vega=float(row.get("ce_vega", 0.0) or 0.0),
+                    ce_rho=float(row.get("ce_rho", 0.0) or 0.0),
+                    pe_delta=float(row.get("pe_delta", 0.0) or 0.0),
+                    pe_gamma=float(row.get("pe_gamma", 0.0) or 0.0),
+                    pe_theta=float(row.get("pe_theta", 0.0) or 0.0),
+                    pe_vega=float(row.get("pe_vega", 0.0) or 0.0),
+                    pe_rho=float(row.get("pe_rho", 0.0) or 0.0),
                 )
                 for row in payload.get("rows", [])
             ]
@@ -203,12 +248,17 @@ class MarketDataService:
                 iv=float(payload.get("iv", 0.0) or 0.0),
                 rows=rows,
                 timestamp=payload.get("timestamp", datetime.now(timezone.utc)),
+                expiries=[str(item) for item in payload.get("expiries", []) if str(item).strip()],
             )
             if snapshot.spot_price <= 0.0 or not snapshot.rows or snapshot.rows[0].strike_price <= 0:
                 return self._fallback_option_chain(normalized, expiry)
             self._cache.set(key, snapshot)
             return snapshot
         except BrokerConnectionError as exc:
+            if isinstance(exc, BrokerNotLoggedIn):
+                self._reconnecting = True
+                self._last_error = self._SESSION_EXPIRED_MESSAGE
+                raise
             cached = self._cache.get(key)
             if cached is not None:
                 self._reconnecting = True
@@ -238,6 +288,10 @@ class MarketDataService:
             self._cache.set(key, candles)
             return candles
         except BrokerConnectionError as exc:
+            if isinstance(exc, BrokerNotLoggedIn):
+                self._reconnecting = True
+                self._last_error = self._SESSION_EXPIRED_MESSAGE
+                raise
             cached = self._cache.get(key)
             if cached is not None:
                 self._reconnecting = True
@@ -313,12 +367,18 @@ class MarketDataService:
             "NIFTY": 25000,
             "BANKNIFTY": 57820,
             "FINNIFTY": 28110,
+            "MIDCPNIFTY": 13250,
+            "SENSEX": 82000,
         }
         spot = float(base_map.get(underlying, 25000))
         if underlying == "BANKNIFTY":
             strikes = [57600, 57700, 57800, 57900, 58000]
         elif underlying == "FINNIFTY":
             strikes = [27900, 28000, 28100, 28200, 28300]
+        elif underlying == "MIDCPNIFTY":
+            strikes = [13100, 13150, 13200, 13250, 13300]
+        elif underlying == "SENSEX":
+            strikes = [81800, 81900, 82000, 82100, 82200]
         else:
             strikes = [24600, 24700, 24800, 24900, 25000, 25100]
         rows: list[OptionChainRow] = []
@@ -393,6 +453,10 @@ class MarketDataService:
             self._cache.set(key, rows)
             return rows
         except BrokerConnectionError as exc:
+            if isinstance(exc, BrokerNotLoggedIn):
+                self._reconnecting = True
+                self._last_error = self._SESSION_EXPIRED_MESSAGE
+                raise
             cached = self._cache.get(key)
             if cached is not None:
                 self._reconnecting = True
@@ -418,6 +482,10 @@ class MarketDataService:
             self._cache.set(key, rows)
             return rows
         except BrokerConnectionError as exc:
+            if isinstance(exc, BrokerNotLoggedIn):
+                self._reconnecting = True
+                self._last_error = self._SESSION_EXPIRED_MESSAGE
+                raise
             cached = self._cache.get(key)
             if cached is not None:
                 self._reconnecting = True
@@ -426,7 +494,40 @@ class MarketDataService:
             return []
 
     def reconnecting_message(self) -> str:
+        if self._last_error:
+            return self._last_error
         return "Broker connection unavailable."
+
+    def is_connected(self) -> bool:
+        manager = self._get_fivepaisa_session_manager()
+        if manager is None:
+            return not self._reconnecting
+        return bool(manager.is_connected())
+
+    def get_session(self):
+        manager = self._get_fivepaisa_session_manager()
+        if manager is None:
+            return None
+        return manager.get_session()
+
+    def refresh_if_needed(self) -> bool:
+        manager = self._get_fivepaisa_session_manager()
+        if manager is None:
+            return True
+        return bool(manager.refresh_if_needed())
+
+    def connection_status(self) -> str:
+        manager = self._get_fivepaisa_session_manager()
+        if manager is None:
+            return "Disconnected" if self._reconnecting else "Connected"
+        state = manager.state()
+        if state == LoginState.CONNECTED:
+            return "Connected"
+        if state == LoginState.CONNECTING or state == LoginState.RECONNECTING:
+            return "Connecting"
+        if state == LoginState.SESSION_EXPIRED:
+            return "Expired"
+        return "Disconnected"
 
     def is_reconnecting(self) -> bool:
         return self._reconnecting
@@ -435,11 +536,15 @@ class MarketDataService:
         return self._last_error
 
     def _run(self) -> None:
+        app_logger.info(
+            f"AUTH_TRACE event=startup_worker ts={datetime.now(timezone.utc).isoformat()} thread={threading.current_thread().name} "
+            f"caller={inspect.stack(context=0)[1].function} file={inspect.stack(context=0)[1].filename} line={inspect.stack(context=0)[1].lineno} "
+            f"session_state={self.connection_status()} auth_in_progress={getattr(self._broker_manager.active_broker()._login_service._broker_client, 'authentication_in_progress', lambda: False)()} "
+            f"reconnect_timer={{'refresh_interval_seconds': {self.refresh_interval_seconds}, 'reconnecting': {self._reconnecting}}}"
+        )
         while not self._stop.is_set():
             changed_symbols: list[str] = []
             try:
-                if not self._broker_manager.is_logged_in():
-                    self._broker_manager.login()
                 for exchange in self.universe.exchanges:
                     rows = self._broker_manager.get_quotes(exchange=exchange, instrument_type="EQUITY")
                     for row in rows:
@@ -470,7 +575,10 @@ class MarketDataService:
                 self._emit(MarketDataEvent(MarketEventType.TICK, sorted(set(changed_symbols)), datetime.now(timezone.utc), "market tick"))
             except BrokerConnectionError as exc:
                 self._reconnecting = True
-                self._last_error = str(exc)
+                if isinstance(exc, BrokerNotLoggedIn):
+                    self._last_error = self._SESSION_EXPIRED_MESSAGE
+                else:
+                    self._last_error = str(exc)
                 self._emit(MarketDataEvent(MarketEventType.CONNECTION, [], datetime.now(timezone.utc), self.reconnecting_message()))
                 app_logger.warning(f"Live market refresh failed: {exc}")
             sleep(self.refresh_interval_seconds)
@@ -483,6 +591,18 @@ class MarketDataService:
                 handler(event)
             except Exception as exc:
                 app_logger.error(f"MarketDataService subscriber error: {exc}")
+
+    def _get_fivepaisa_session_manager(self):
+        try:
+            broker = self._broker_manager.active_broker()
+        except Exception:
+            return None
+        login_service = getattr(broker, "_login_service", None)
+        broker_client = getattr(login_service, "_broker_client", None)
+        session_manager = getattr(broker_client, "session_manager", None)
+        if session_manager is None:
+            return None
+        return session_manager
 
 
 market_data_service = MarketDataService()

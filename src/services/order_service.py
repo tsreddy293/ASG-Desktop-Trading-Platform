@@ -173,7 +173,7 @@ class OrderService:
         if "unauthorized" in lowered or "401" in lowered or "not authorized" in lowered:
             return OrderServiceError("unauthorized", "Unauthorized request to broker")
         if "session expired" in lowered or "token expired" in lowered or "invalid session" in lowered:
-            return OrderServiceError("session_expired", "Session expired. Please login again")
+            return OrderServiceError("session_expired", "Session expired. Please click Connect.")
         if "timeout" in lowered or "timed out" in lowered:
             return OrderServiceError("timeout", "Network timeout while calling broker")
         if isinstance(exc, (ConnectionError, BrokerConnectionError)) or "network" in lowered or "connection" in lowered:

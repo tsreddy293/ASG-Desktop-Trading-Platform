@@ -1,0 +1,16 @@
+instances_created=
+calls=
+method=_load_secure|id(self)=2633705873360|session_object_id=None|access_token_length=0|session_state=Not Connected|return_value=None
+method=get_session|id(self)=2633705873360|session_object_id=None|access_token_length=0|session_state=Not Connected|return_value=None
+method=_load_secure|id(self)=2633705873360|session_object_id=None|access_token_length=0|session_state=Not Connected|return_value=None
+method=get_session|id(self)=2633705873360|session_object_id=None|access_token_length=0|session_state=Not Connected|return_value=None
+method=_store_secure|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connecting|return_value=None
+method=get_session|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value={'type': 'BrokerSession', 'id': 2633713105968, 'access_token_length': 199}
+method=set_session|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value={'type': 'BrokerSession', 'id': 2633713105968, 'access_token_length': 199}
+method=get_session|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value={'type': 'BrokerSession', 'id': 2633713105968, 'access_token_length': 199}
+method=get_session|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value={'type': 'BrokerSession', 'id': 2633713105968, 'access_token_length': 199}
+method=needs_refresh|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value=False
+method=get_session|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value={'type': 'BrokerSession', 'id': 2633713105968, 'access_token_length': 199}
+method=needs_refresh|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value=False
+method=get_session|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value={'type': 'BrokerSession', 'id': 2633713105968, 'access_token_length': 199}
+method=needs_refresh|id(self)=2633705873360|session_object_id=2633713105968|access_token_length=199|session_state=Connected|return_value=False

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import inspect
+import threading
 from datetime import datetime, timedelta, timezone
 from time import sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+import re
 
-from src.brokers.base_broker import BrokerConnectionError
+from src.brokers.base_broker import BrokerConnectionError, BrokerNotLoggedIn
 from src.brokers.fivepaisa.broker_client import FivePaisaBrokerClient
 from src.brokers.fivepaisa.session_manager import FivePaisaSessionManager
 from src.core.logger import app_logger
@@ -34,7 +37,14 @@ class MarketDataService:
         self._quote_path = os.getenv("FIVEPAISA_QUOTE_PATH", "/VendorsAPI/Service1.svc/V1/MarketFeed")
         self._market_depth_path = os.getenv("FIVEPAISA_MARKET_DEPTH_PATH", self._quote_path)
         self._historical_path = os.getenv("FIVEPAISA_HISTORICAL_PATH", "/VendorsAPI/Service1.svc/HistoricalData")
-        self._option_chain_path = os.getenv("FIVEPAISA_OPTION_CHAIN_PATH", "/VendorsAPI/Service1.svc/OptionChain")
+        self._option_chain_expiry_path = os.getenv(
+            "FIVEPAISA_OPTION_CHAIN_EXPIRY_PATH",
+            "/VendorsAPI/Service1.svc/V2/GetExpiryForSymbolOptions",
+        )
+        self._option_chain_data_path = os.getenv(
+            "FIVEPAISA_OPTION_CHAIN_DATA_PATH",
+            "/VendorsAPI/Service1.svc/GetOptionsForSymbol",
+        )
 
         self._api_key = os.getenv("FIVEPAISA_API_KEY", "").strip()
         self._cache_ttl_seconds = float(os.getenv("FIVEPAISA_MARKET_CACHE_SECONDS", "4") or "4")
@@ -153,53 +163,222 @@ class MarketDataService:
         if cached is not None:
             return cached
 
-        query: dict[str, Any] = {"Symbol": normalized_symbol}
-        if normalized_expiry:
-            query["Expiry"] = normalized_expiry
+        session = self._session_manager.require_valid_session()
+        option_exchange = self._option_exchange_for_symbol(normalized_symbol)
 
-        payload = self._request_json("GET", self._option_chain_path, query=query)
+        expiry_payload = self._request_json(
+            "POST",
+            self._option_chain_expiry_path,
+            body={
+                "head": self._request_head(),
+                "body": {
+                    "Exch": option_exchange,
+                    "Symbol": normalized_symbol,
+                    "ClientCode": session.client_code,
+                },
+            },
+        )
 
-        root = self._extract_dict(payload)
-        rows_raw = root.get("Options", root.get("Data", []))
-        rows: list[dict[str, Any]] = []
+        expiry_root = self._extract_dict(expiry_payload)
+        expiry_entries = expiry_root.get("Expiry", [])
+        expiries_raw: list[str] = []
+        expiries_display: list[str] = []
+        if isinstance(expiry_entries, list):
+            for item in expiry_entries:
+                if not isinstance(item, dict):
+                    continue
+                raw_expiry = str(item.get("ExpiryDate", "") or "").strip()
+                if not raw_expiry:
+                    continue
+                expiries_raw.append(raw_expiry)
+                expiries_display.append(self._format_expiry_display(raw_expiry))
+
+        selected_expiry_raw = self._select_expiry_raw(normalized_expiry, expiries_raw)
+        selected_expiry_display = self._format_expiry_display(selected_expiry_raw)
+
+        options_payload = self._request_json(
+            "POST",
+            self._option_chain_data_path,
+            body={
+                "head": self._request_head(),
+                "body": {
+                    "Exch": option_exchange,
+                    "Symbol": normalized_symbol,
+                    "ExpiryDate": self._normalize_expiry_for_request(selected_expiry_raw),
+                    "ClientCode": session.client_code,
+                },
+            },
+        )
+
+        options_root = self._extract_dict(options_payload)
+        rows_raw = options_root.get("Options", options_root.get("Data", []))
+        rows_by_strike: dict[int, dict[str, Any]] = {}
+
+        def _get_or_create_row(strike_price: int) -> dict[str, Any]:
+            strike_key = int(strike_price)
+            if strike_key not in rows_by_strike:
+                rows_by_strike[strike_key] = {
+                    "strike_price": strike_key,
+                    "ce_ltp": 0.0,
+                    "ce_oi": 0,
+                    "ce_change_oi": 0,
+                    "ce_volume": 0,
+                    "ce_bid": 0.0,
+                    "ce_ask": 0.0,
+                    "ce_iv": 0.0,
+                    "ce_delta": 0.0,
+                    "ce_gamma": 0.0,
+                    "ce_theta": 0.0,
+                    "ce_vega": 0.0,
+                    "ce_rho": 0.0,
+                    "pe_oi": 0,
+                    "pe_change_oi": 0,
+                    "pe_volume": 0,
+                    "pe_ltp": 0.0,
+                    "pe_bid": 0.0,
+                    "pe_ask": 0.0,
+                    "pe_iv": 0.0,
+                    "pe_delta": 0.0,
+                    "pe_gamma": 0.0,
+                    "pe_theta": 0.0,
+                    "pe_vega": 0.0,
+                    "pe_rho": 0.0,
+                    "iv": 0.0,
+                    "pcr": 0.0,
+                }
+            return rows_by_strike[strike_key]
+
+        def _apply_leg_metrics(target: dict[str, Any], prefix: str, leg: dict[str, Any], item: dict[str, Any]) -> None:
+            target[f"{prefix}_ltp"] = float(
+                leg.get("LTP", leg.get("LastRate", item.get("LTP", item.get("LastRate", 0.0)))) or 0.0
+            )
+            oi_value = int(leg.get("OI", leg.get("OpenInterest", item.get("OI", item.get("OpenInterest", 0)))) or 0)
+            target[f"{prefix}_oi"] = oi_value
+            target[f"{prefix}_change_oi"] = int(leg.get("ChangeInOI", item.get("ChangeInOI", 0)) or 0)
+            target[f"{prefix}_volume"] = int(leg.get("Volume", leg.get("Vol", item.get("Volume", item.get("Vol", 0)))) or 0)
+            target[f"{prefix}_bid"] = float(leg.get("Bid", leg.get("BestBuyRate", item.get("Bid", item.get("BestBuyRate", 0.0)))) or 0.0)
+            target[f"{prefix}_ask"] = float(leg.get("Ask", leg.get("BestSellRate", item.get("Ask", item.get("BestSellRate", 0.0)))) or 0.0)
+            target[f"{prefix}_iv"] = float(leg.get("IV", leg.get("ImpVol", item.get("IV", item.get("ImpVol", 0.0)))) or 0.0)
+            target[f"{prefix}_delta"] = float(leg.get("Delta", item.get("Delta", 0.0)) or 0.0)
+            target[f"{prefix}_gamma"] = float(leg.get("Gamma", item.get("Gamma", 0.0)) or 0.0)
+            target[f"{prefix}_theta"] = float(leg.get("Theta", item.get("Theta", 0.0)) or 0.0)
+            target[f"{prefix}_vega"] = float(leg.get("Vega", item.get("Vega", 0.0)) or 0.0)
+            target[f"{prefix}_rho"] = float(leg.get("Rho", item.get("Rho", 0.0)) or 0.0)
+
         for item in rows_raw if isinstance(rows_raw, list) else []:
-            strike = int(item.get("StrikePrice", 0) or 0)
+            if not isinstance(item, dict):
+                continue
+            strike = int(item.get("StrikePrice", item.get("StrikeRate", 0)) or 0)
+            if strike <= 0:
+                continue
+
+            row = _get_or_create_row(strike)
             ce = item.get("CE", {}) if isinstance(item.get("CE", {}), dict) else {}
             pe = item.get("PE", {}) if isinstance(item.get("PE", {}), dict) else {}
-            ce_oi = int(ce.get("OI", 0) or 0)
-            pe_oi = int(pe.get("OI", 0) or 0)
-            rows.append(
-                {
-                    "strike_price": strike,
-                    "ce_ltp": float(ce.get("LTP", 0.0) or 0.0),
-                    "ce_oi": ce_oi,
-                    "ce_change_oi": int(ce.get("ChangeInOI", 0) or 0),
-                    "pe_oi": pe_oi,
-                    "pe_change_oi": int(pe.get("ChangeInOI", 0) or 0),
-                    "pe_ltp": float(pe.get("LTP", 0.0) or 0.0),
-                    "iv": float(item.get("IV", 0.0) or 0.0),
-                    "pcr": float(pe_oi / ce_oi) if ce_oi else 0.0,
-                }
-            )
+            cp_type = str(item.get("CPType", item.get("OptionType", "")) or "").strip().upper()
+
+            if ce or pe:
+                if ce:
+                    _apply_leg_metrics(row, "ce", ce, item)
+                if pe:
+                    _apply_leg_metrics(row, "pe", pe, item)
+            elif cp_type in {"CE", "CALL"}:
+                _apply_leg_metrics(row, "ce", item, item)
+            elif cp_type in {"PE", "PUT"}:
+                _apply_leg_metrics(row, "pe", item, item)
+
+        rows: list[dict[str, Any]] = []
+        for strike in sorted(rows_by_strike):
+            row = rows_by_strike[strike]
+            ce_oi = int(row.get("ce_oi", 0) or 0)
+            pe_oi = int(row.get("pe_oi", 0) or 0)
+            iv_ce = float(row.get("ce_iv", 0.0) or 0.0)
+            iv_pe = float(row.get("pe_iv", 0.0) or 0.0)
+            row["iv"] = iv_ce if iv_ce > 0 else iv_pe
+            row["pcr"] = float(pe_oi / ce_oi) if ce_oi else 0.0
+            rows.append(row)
 
         rows.sort(key=lambda row: row["strike_price"])
-        spot_price = float(root.get("SpotPrice", root.get("LTP", 0.0)) or 0.0)
+        spot_rows = options_root.get("lastrate", options_root.get("LastRate", []))
+        spot_price = 0.0
+        if isinstance(spot_rows, list) and spot_rows:
+            first_spot = spot_rows[0] if isinstance(spot_rows[0], dict) else {}
+            spot_price = float(first_spot.get("LTP", first_spot.get("LastRate", 0.0)) or 0.0)
+        if spot_price <= 0.0:
+            spot_price = float(options_root.get("SpotPrice", options_root.get("LTP", 0.0)) or 0.0)
         atm = min((row["strike_price"] for row in rows), key=lambda strike: abs(strike - spot_price), default=0)
         total_ce = sum(row["ce_oi"] for row in rows)
         total_pe = sum(row["pe_oi"] for row in rows)
 
         response = {
             "underlying": normalized_symbol,
-            "expiry": str(root.get("Expiry", normalized_expiry)),
+            "expiry": selected_expiry_display,
+            "expiry_raw": selected_expiry_raw,
+            "expiries": expiries_display,
+            "expiries_raw": expiries_raw,
             "spot_price": spot_price,
             "atm_strike": atm,
             "pcr": (total_pe / total_ce) if total_ce else 0.0,
-            "iv": float(root.get("IV", 0.0) or 0.0),
+            "iv": float(options_root.get("IV", 0.0) or 0.0),
             "rows": rows,
             "timestamp": datetime.now(timezone.utc),
         }
         self._set_cache(cache_key, response)
         return response
+
+    @staticmethod
+    def _select_expiry_raw(requested_expiry: str, expiries_raw: list[str]) -> str:
+        if not expiries_raw:
+            return ""
+
+        requested = str(requested_expiry or "").strip()
+        if not requested:
+            return expiries_raw[0]
+
+        lowered_requested = requested.lower()
+        for raw in expiries_raw:
+            if raw.lower() == lowered_requested:
+                return raw
+
+        for raw in expiries_raw:
+            if MarketDataService._format_expiry_display(raw).lower() == lowered_requested:
+                return raw
+
+        return expiries_raw[0]
+
+    @staticmethod
+    def _format_expiry_display(expiry_raw: str) -> str:
+        raw = str(expiry_raw or "").strip()
+        if not raw:
+            return ""
+
+        match = re.search(r"/Date\((\d+)", raw)
+        if not match:
+            return raw
+
+        try:
+            millis = int(match.group(1))
+            dt = datetime.fromtimestamp(millis / 1000.0, tz=timezone.utc)
+            return dt.astimezone().strftime("%d %b %Y")
+        except Exception:
+            return raw
+
+    @staticmethod
+    def _normalize_expiry_for_request(expiry_raw: str) -> str:
+        raw = str(expiry_raw or "").strip()
+        if not raw:
+            return raw
+        match = re.search(r"/Date\((\d+)", raw)
+        if not match:
+            return raw
+        return f"/Date({match.group(1)})/"
+
+    @staticmethod
+    def _option_exchange_for_symbol(symbol: str) -> str:
+        normalized = str(symbol or "").strip().upper()
+        if normalized in {"SENSEX", "BANKEX"}:
+            return "B"
+        return "N"
 
     def get_historical_candles(
         self,
@@ -223,6 +402,8 @@ class MarketDataService:
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
+
+        self._require_authenticated()
 
         payload = self._request_json(
             "GET",
@@ -279,7 +460,13 @@ class MarketDataService:
         body: dict[str, Any] | None = None,
         query: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._broker_client.ensure_authenticated()
+        app_logger.info(
+            f"AUTH_TRACE event=market_data_service.authenticate ts={datetime.now(timezone.utc).isoformat()} thread={threading.current_thread().name} "
+            f"caller={inspect.stack(context=0)[1].function} file={inspect.stack(context=0)[1].filename} line={inspect.stack(context=0)[1].lineno} "
+            f"session_state={self._session_manager.state().value} auth_in_progress={getattr(self._broker_client, 'authentication_in_progress', lambda: False)()} "
+            f"reconnect_timer={{'session_manager_state': '{self._session_manager.state().value}'}}"
+        )
+        self._require_authenticated()
 
         url = f"{self._base_url}{path}"
         if query:
@@ -317,13 +504,7 @@ class MarketDataService:
                 error_text = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
                 app_logger.warning(f"5paisa API HTTP error {exc.code} on attempt {attempt}: {error_text}")
                 if exc.code in {401, 403}:
-                    self._session_manager.clear()
-                    try:
-                        self._broker_client.ensure_authenticated()
-                        continue
-                    except Exception:
-                        pass
-                    raise BrokerConnectionError("Broker API error: unauthorized") from exc
+                    raise BrokerNotLoggedIn("Session expired. Please click Connect.") from exc
                 if exc.code in {408, 429, 500, 502, 503, 504} and attempt < self._retry_attempts:
                     sleep(0.2 * attempt)
                     continue
@@ -349,6 +530,14 @@ class MarketDataService:
                 raise BrokerConnectionError(f"Broker connection unavailable: {exc}") from exc
 
         raise BrokerConnectionError(f"Broker connection unavailable: {last_error}")
+
+    def _require_authenticated(self) -> None:
+        try:
+            if self._session_manager.is_connected() and not self._session_manager.needs_refresh():
+                return
+        except Exception:
+            pass
+        raise BrokerNotLoggedIn("Session expired. Please click Connect.")
 
     def _build_headers(self) -> dict[str, str]:
         token = self._session_manager.get_access_token()

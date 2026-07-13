@@ -4,11 +4,13 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime, timedelta, timezone
 import os
+import inspect
+import threading
 from threading import Event, Lock, RLock, Thread
 from time import sleep
 from typing import Callable
 
-from src.brokers.base_broker import BrokerConnectionError
+from src.brokers.base_broker import BrokerConnectionError, BrokerNotLoggedIn
 from src.core.logger import app_logger
 
 
@@ -119,6 +121,11 @@ class FivePaisaSessionManager:
             self._stop_event.clear()
             self._validator_thread = Thread(target=self._run_validation_loop, daemon=True)
             self._validator_thread.start()
+            app_logger.info(
+                f"AUTH_TRACE event=reconnect_timer_started ts={datetime.now(timezone.utc).isoformat()} thread={threading.current_thread().name} "
+                f"caller={inspect.stack(context=0)[1].function} file={inspect.stack(context=0)[1].filename} line={inspect.stack(context=0)[1].lineno} "
+                f"session_state={self._state.value} auth_in_progress=False reconnect_timer={{'validator_thread_alive': True, 'stop_event': {self._stop_event.is_set()}, 'reconnect_interrupt': {self._reconnect_interrupt.is_set()}}}"
+            )
 
     def stop_validation(self) -> None:
         with self._lock:
@@ -244,7 +251,7 @@ class FivePaisaSessionManager:
     def get_access_token(self) -> str:
         session = self.get_session()
         if session is None or not session.access_token:
-            raise BrokerConnectionError("Broker connection unavailable.")
+            raise BrokerNotLoggedIn("Session expired. Please click Connect.")
         return session.access_token
 
     def needs_refresh(self) -> bool:
@@ -262,9 +269,9 @@ class FivePaisaSessionManager:
     def require_valid_session(self) -> BrokerSession:
         session = self.get_session()
         if session is None or not session.access_token:
-            raise BrokerConnectionError("Broker connection unavailable.")
+            raise BrokerNotLoggedIn("Session expired. Please click Connect.")
         if self.needs_refresh():
-            raise BrokerConnectionError("Broker connection unavailable.")
+            raise BrokerNotLoggedIn("Session expired. Please click Connect.")
         return session
 
     def mark_connecting(self) -> None:
@@ -304,6 +311,11 @@ class FivePaisaSessionManager:
                 app_logger.error(f"5paisa session event handler error: {exc}")
 
     def _run_validation_loop(self) -> None:
+        app_logger.info(
+            f"AUTH_TRACE event=reconnect_timer_loop ts={datetime.now(timezone.utc).isoformat()} thread={threading.current_thread().name} "
+            f"caller={inspect.stack(context=0)[1].function} file={inspect.stack(context=0)[1].filename} line={inspect.stack(context=0)[1].lineno} "
+            f"session_state={self.state().value} auth_in_progress=False reconnect_timer={{'validator_thread_alive': True, 'stop_event': {self._stop_event.is_set()}, 'reconnect_interrupt': {self._reconnect_interrupt.is_set()}}}"
+        )
         while not self._stop_event.is_set():
             try:
                 session = self.get_session()
@@ -333,6 +345,11 @@ class FivePaisaSessionManager:
             sleep(self._validation_interval_seconds)
 
     def _attempt_reconnect(self) -> bool:
+        app_logger.info(
+            f"AUTH_TRACE event=reconnect_timer_attempt ts={datetime.now(timezone.utc).isoformat()} thread={threading.current_thread().name} "
+            f"caller={inspect.stack(context=0)[1].function} file={inspect.stack(context=0)[1].filename} line={inspect.stack(context=0)[1].lineno} "
+            f"session_state={self.state().value} auth_in_progress=False reconnect_timer={{'validator_thread_alive': {bool(self._validator_thread and self._validator_thread.is_alive())}, 'stop_event': {self._stop_event.is_set()}, 'reconnect_interrupt': {self._reconnect_interrupt.is_set()}}}"
+        )
         retries = min(self._max_retries, len(self._retry_backoff_seconds))
         self._reconnect_interrupt.clear()
         for attempt in range(retries):

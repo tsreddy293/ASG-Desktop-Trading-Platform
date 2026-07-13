@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
@@ -60,6 +60,24 @@ class OptionChainRow:
     pcr: float
     ce_change_oi: int = 0
     pe_change_oi: int = 0
+    ce_volume: int = 0
+    pe_volume: int = 0
+    ce_bid: float = 0.0
+    ce_ask: float = 0.0
+    pe_bid: float = 0.0
+    pe_ask: float = 0.0
+    ce_iv: float = 0.0
+    pe_iv: float = 0.0
+    ce_delta: float = 0.0
+    ce_gamma: float = 0.0
+    ce_theta: float = 0.0
+    ce_vega: float = 0.0
+    ce_rho: float = 0.0
+    pe_delta: float = 0.0
+    pe_gamma: float = 0.0
+    pe_theta: float = 0.0
+    pe_vega: float = 0.0
+    pe_rho: float = 0.0
 
 
 @dataclass(slots=True)
@@ -72,6 +90,7 @@ class OptionChainSnapshot:
     iv: float
     rows: list[OptionChainRow]
     timestamp: datetime
+    expiries: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

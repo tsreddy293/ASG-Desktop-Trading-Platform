@@ -165,6 +165,7 @@ def test_validation_loop_runs_and_can_stop(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr("src.brokers.fivepaisa.session_manager.sleep", _fast_sleep)
 
     manager.start_validation()
+    ran.wait(0.2)
     manager.stop_validation()
 
     assert ran.is_set()

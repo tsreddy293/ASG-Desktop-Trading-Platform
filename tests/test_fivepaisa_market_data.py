@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from src.brokers.base_broker import BrokerConnectionError
 from src.brokers.fivepaisa.market_data_service import MarketDataService
+from src.brokers.fivepaisa.session_manager import FivePaisaSessionManager
 
 
 class _Session:
     def __init__(self) -> None:
         self.token = "token-1"
         self.client_code = "C123"
+        self.connected = True
 
     def get_access_token(self) -> str:
         return self.token
@@ -19,8 +22,18 @@ class _Session:
     def require_valid_session(self):
         return self
 
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def state(self):
+        return SimpleNamespace(value="Connected" if self.connected else "Not Connected")
+
+    def needs_refresh(self) -> bool:
+        return False
+
     def clear(self) -> None:
         self.token = ""
+        self.connected = False
 
 
 class _Client:
@@ -125,33 +138,18 @@ def test_request_json_retries_on_unauthorized(monkeypatch: pytest.MonkeyPatch) -
 
     def fake_urlopen(req, timeout=20):
         attempts["n"] += 1
-        if attempts["n"] == 1:
-            raise HTTPError(req.full_url, 401, "unauthorized", hdrs=None, fp=BytesIO(b""))
-
-        class _Resp:
-            status = 200
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def read(self):
-                return b'{"Data":[{"Symbol":"SBIN","LastRate":100,"Close":100}]}'
-
-        return _Resp()
+        raise HTTPError(req.full_url, 401, "unauthorized", hdrs=None, fp=BytesIO(b""))
 
     monkeypatch.setattr("src.brokers.fivepaisa.market_data_service.urlopen", fake_urlopen)
-    out = service._request_json("GET", "/x")
-    assert out["Data"][0]["Symbol"] == "SBIN"
-    assert attempts["n"] == 2
+    with pytest.raises(BrokerConnectionError, match="Session expired\\. Please click Connect\\."):
+        service._request_json("GET", "/x")
+    assert attempts["n"] == 1
 
 
 def test_get_historical_candles_maps_candles(monkeypatch: pytest.MonkeyPatch) -> None:
     service = _mk_service()
 
-    def fake_request(method, path, body=None, query=None):
+    def fake_request(method, path, body=None, query=None, **kwargs):
         return {
             "Data": [
                 {
@@ -169,6 +167,21 @@ def test_get_historical_candles_maps_candles(monkeypatch: pytest.MonkeyPatch) ->
     candles = service.get_historical_candles("SBIN", "15 Minute", "2026-07-01", "2026-07-11")
     assert len(candles) == 1
     assert candles[0]["close"] == 101
+
+
+def test_get_historical_candles_requires_ready_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    session_manager = FivePaisaSessionManager()
+    session_manager.clear()
+    service = MarketDataService(broker_client=_Client(), session_manager=session_manager)
+
+    monkeypatch.setattr(
+        service,
+        "_request_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("request should not run")),
+    )
+
+    with pytest.raises(BrokerConnectionError, match="Session expired\\. Please click Connect\\."):
+        service.get_historical_candles("SBIN", "15 Minute", "2026-07-01", "2026-07-11")
 
 
 def test_quote_uses_official_marketfeed_payload(monkeypatch: pytest.MonkeyPatch) -> None:

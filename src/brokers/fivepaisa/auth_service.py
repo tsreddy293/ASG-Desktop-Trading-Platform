@@ -82,7 +82,8 @@ class FivePaisaAuthService:
         access_token = str(body.get("AccessToken", "") or "").strip()
         refresh_token = str(body.get("RefreshToken", "") or "").strip()
         client_code = str(body.get("ClientCode", "") or "").strip()
-        status = str(body.get("Status", "") or "").strip()
+        raw_status = body.get("Status", "")
+        status = str(raw_status).strip()
 
         normalized_status = status.lower()
         if not access_token or normalized_status not in {"success", "ok", "true", "0"}:

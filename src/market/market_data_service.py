@@ -33,6 +33,24 @@ class OptionChainServiceRow:
     pe_ltp: float
     iv: float
     pcr: float
+    ce_volume: int = 0
+    pe_volume: int = 0
+    ce_bid: float = 0.0
+    ce_ask: float = 0.0
+    pe_bid: float = 0.0
+    pe_ask: float = 0.0
+    ce_iv: float = 0.0
+    pe_iv: float = 0.0
+    ce_delta: float = 0.0
+    ce_gamma: float = 0.0
+    ce_theta: float = 0.0
+    ce_vega: float = 0.0
+    ce_rho: float = 0.0
+    pe_delta: float = 0.0
+    pe_gamma: float = 0.0
+    pe_theta: float = 0.0
+    pe_vega: float = 0.0
+    pe_rho: float = 0.0
 
 
 @dataclass(slots=True)
@@ -45,6 +63,7 @@ class OptionChainServiceSnapshot:
     iv: float
     last_updated: datetime
     rows: list[OptionChainServiceRow]
+    expiries: list[str]
 
 
 class MarketDataService:
@@ -89,14 +108,17 @@ class MarketDataService:
         market_data_service.unsubscribe(handler)
 
     def get_option_chain_underlyings(self) -> list[str]:
-        return ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+        return ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]
 
     def get_option_chain_expiries(self, underlying: str) -> list[str]:
         normalized = (underlying or "NIFTY").upper()
-        if normalized == "BANKNIFTY":
-            return ["30 Jul 2026", "06 Aug 2026", "13 Aug 2026"]
-        if normalized == "FINNIFTY":
-            return ["28 Jul 2026", "04 Aug 2026", "11 Aug 2026"]
+        try:
+            snapshot = market_data_service.get_option_chain(normalized, "")
+            expiries = [item for item in snapshot.expiries if str(item).strip()]
+            if expiries:
+                return expiries
+        except Exception:
+            pass
         return ["31 Jul 2026", "07 Aug 2026", "14 Aug 2026"]
 
     def get_option_chain_snapshot(self, underlying: str, expiry: str) -> OptionChainServiceSnapshot:
@@ -112,6 +134,24 @@ class MarketDataService:
                 pe_ltp=row.pe_ltp,
                 iv=row.iv,
                 pcr=row.pcr,
+                ce_volume=row.ce_volume,
+                pe_volume=row.pe_volume,
+                ce_bid=row.ce_bid,
+                ce_ask=row.ce_ask,
+                pe_bid=row.pe_bid,
+                pe_ask=row.pe_ask,
+                ce_iv=row.ce_iv,
+                pe_iv=row.pe_iv,
+                ce_delta=row.ce_delta,
+                ce_gamma=row.ce_gamma,
+                ce_theta=row.ce_theta,
+                ce_vega=row.ce_vega,
+                ce_rho=row.ce_rho,
+                pe_delta=row.pe_delta,
+                pe_gamma=row.pe_gamma,
+                pe_theta=row.pe_theta,
+                pe_vega=row.pe_vega,
+                pe_rho=row.pe_rho,
             )
             for row in central.rows
         ]
@@ -124,6 +164,7 @@ class MarketDataService:
             iv=central.iv,
             last_updated=central.timestamp,
             rows=rows,
+            expiries=central.expiries,
         )
 
     def refresh_live_market(self) -> MarketDataResult:
@@ -166,7 +207,7 @@ class MarketDataService:
                     rows = list(self._cache.values())
 
                 if self._reconnecting and service_error:
-                    error_message = "Broker connection unavailable."
+                    error_message = str(service_error)
                 else:
                     error_message = None
 

@@ -1,5 +1,8 @@
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
+from datetime import datetime, timezone
+import threading
+import inspect
 
 from src.core.database import database_manager
 from src.core.logger import app_logger
@@ -34,6 +37,11 @@ class ASGApplication:
         self.window = MainWindow(self.app)
 
         def launch() -> None:
+            app_logger.info(
+                f"AUTH_TRACE event=app_startup_worker ts={datetime.now(timezone.utc).isoformat()} thread={threading.current_thread().name} "
+                f"caller={inspect.stack(context=0)[1].function} file={inspect.stack(context=0)[1].filename} line={inspect.stack(context=0)[1].lineno} "
+                f"session_state=unknown auth_in_progress=unknown reconnect_timer=unknown"
+            )
             splash.update_status(t("splash.launching"), 100)
             splash.close()
             self.window.show()

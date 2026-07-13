@@ -5,7 +5,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from src.marketdata.service import MarketDataService, market_data_service
+from src.marketdata.service import MarketDataService, market_data_service as shared_market_data_service
 
 
 class DashboardViewModel(QObject):
@@ -18,20 +18,21 @@ class DashboardViewModel(QObject):
 
     def __init__(self, market_data_service: MarketDataService | None = None, refresh_seconds: int = 4) -> None:
         super().__init__()
-        self._service = market_data_service or market_data_service
+        self._service = market_data_service or shared_market_data_service
         self.refresh_seconds = max(2, int(refresh_seconds))
         self._latest_indices: dict[str, dict[str, Any]] = {}
 
     def refresh_indices(self) -> None:
         try:
+            self.status_updated.emit(self._service.connection_status())
             rows = self._service.get_indices()
             normalized = self._normalize_indices(rows)
             self._latest_indices = normalized
             self.indices_updated.emit(normalized)
-            self.status_updated.emit("Connected")
+            self.status_updated.emit(self._service.connection_status())
             self.activity_added.emit(f"{datetime.now().strftime('%H:%M:%S')} refreshed index snapshot")
         except Exception as exc:
-            self.status_updated.emit("Session unavailable")
+            self.status_updated.emit(self._service.connection_status())
             self.log_added.emit(f"{datetime.now().strftime('%H:%M:%S')} index refresh failed: {exc}")
             if self._latest_indices:
                 self.indices_updated.emit(self._latest_indices)

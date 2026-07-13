@@ -1,0 +1,146 @@
+========================
+TS: 2026-07-12T21:26:14.694343
+INSTRUMENTED CALL: runtime_trace.trigger_connect
+CURRENT THREAD: MainThread
+FULL PYTHON STACK TRACE
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 76, in <module>
+    raise SystemExit(app.run())
+  File "d:\Projects\ASG\src\app.py", line 53, in run
+    return self.app.exec()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 68, in _trigger_connect
+    _dump("runtime_trace.trigger_connect")
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 27, in _dump
+    "".join(traceback.format_stack()),
+
+CALLER FUNCTION: run
+CALLER FILE: d:\Projects\ASG\src\app.py
+CALLER LINE: 53
+========================
+========================
+TS: 2026-07-12T21:26:14.697263
+INSTRUMENTED CALL: FivePaisaLoginService.login
+CURRENT THREAD: MainThread
+FULL PYTHON STACK TRACE
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 76, in <module>
+    raise SystemExit(app.run())
+  File "d:\Projects\ASG\src\app.py", line 53, in run
+    return self.app.exec()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 70, in _trigger_connect
+    broker_manager.connect()
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 195, in connect
+    self._safe_call("login")
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 172, in _safe_call
+    return method(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 28, in login
+    self._login_service.login()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 45, in wrapped
+    _dump(label)
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 27, in _dump
+    "".join(traceback.format_stack()),
+
+CALLER FUNCTION: login
+CALLER FILE: d:\Projects\ASG\src\brokers\broker_manager.py
+CALLER LINE: 28
+========================
+========================
+TS: 2026-07-12T21:26:14.701181
+INSTRUMENTED CALL: FivePaisaBrokerClient.ensure_authenticated
+CURRENT THREAD: MainThread
+FULL PYTHON STACK TRACE
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 76, in <module>
+    raise SystemExit(app.run())
+  File "d:\Projects\ASG\src\app.py", line 53, in run
+    return self.app.exec()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 70, in _trigger_connect
+    broker_manager.connect()
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 195, in connect
+    self._safe_call("login")
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 172, in _safe_call
+    return method(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 28, in login
+    self._login_service.login()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 46, in wrapped
+    return original(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\fivepaisa\login.py", line 38, in login
+    self._broker_client.ensure_authenticated()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 45, in wrapped
+    _dump(label)
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 27, in _dump
+    "".join(traceback.format_stack()),
+
+CALLER FUNCTION: login
+CALLER FILE: d:\Projects\ASG\src\brokers\fivepaisa\login.py
+CALLER LINE: 38
+========================
+========================
+TS: 2026-07-12T21:26:14.706361
+INSTRUMENTED CALL: FivePaisaBrokerClient._authenticate_via_oauth_flow
+CURRENT THREAD: MainThread
+FULL PYTHON STACK TRACE
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 76, in <module>
+    raise SystemExit(app.run())
+  File "d:\Projects\ASG\src\app.py", line 53, in run
+    return self.app.exec()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 70, in _trigger_connect
+    broker_manager.connect()
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 195, in connect
+    self._safe_call("login")
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 172, in _safe_call
+    return method(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 28, in login
+    self._login_service.login()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 46, in wrapped
+    return original(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\fivepaisa\login.py", line 38, in login
+    self._broker_client.ensure_authenticated()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 46, in wrapped
+    return original(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\fivepaisa\broker_client.py", line 166, in ensure_authenticated
+    self._authenticate_via_oauth_flow()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 45, in wrapped
+    _dump(label)
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 27, in _dump
+    "".join(traceback.format_stack()),
+
+CALLER FUNCTION: ensure_authenticated
+CALLER FILE: d:\Projects\ASG\src\brokers\fivepaisa\broker_client.py
+CALLER LINE: 166
+========================
+========================
+TS: 2026-07-12T21:26:14.729400
+INSTRUMENTED CALL: webbrowser.open
+CURRENT THREAD: MainThread
+FULL PYTHON STACK TRACE
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 76, in <module>
+    raise SystemExit(app.run())
+  File "d:\Projects\ASG\src\app.py", line 53, in run
+    return self.app.exec()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 70, in _trigger_connect
+    broker_manager.connect()
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 195, in connect
+    self._safe_call("login")
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 172, in _safe_call
+    return method(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\broker_manager.py", line 28, in login
+    self._login_service.login()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 46, in wrapped
+    return original(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\fivepaisa\login.py", line 38, in login
+    self._broker_client.ensure_authenticated()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 46, in wrapped
+    return original(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\fivepaisa\broker_client.py", line 166, in ensure_authenticated
+    self._authenticate_via_oauth_flow()
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 46, in wrapped
+    return original(*args, **kwargs)
+  File "d:\Projects\ASG\src\brokers\fivepaisa\broker_client.py", line 225, in _authenticate_via_oauth_flow
+    webbrowser.open(login_url, new=2)
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 45, in wrapped
+    _dump(label)
+  File "d:\Projects\ASG\runtime_trace_oauth.py", line 27, in _dump
+    "".join(traceback.format_stack()),
+
+CALLER FUNCTION: _authenticate_via_oauth_flow
+CALLER FILE: d:\Projects\ASG\src\brokers\fivepaisa\broker_client.py
+CALLER LINE: 225
+========================
